@@ -1,0 +1,16 @@
+{
+  "description": "One-time, SHA-pinned read-only import of existing modules. Builds write dist only. Source publication vendors these exact files into the independent repository; a clean clone has no Orchestrator dependency.",
+  "sourceRoot": "../chatgpt-orchestrator",
+  "files": {
+    "extension/mobile-structure-content.js": "ebf9db6a503677414da0ac8f07b65ed3fe886663bb5c306b0b8a71d98d0fcfd1",
+    "extension/mobile-presentation.js": "5ad3efe75b78d0473bb974a8e4777faa42cb13796910ad7e4cb29a0b9d4d7b11",
+    "extension/pc-resilience-background.js": "be63e78dc6645c41a0bc465c29fd5eccd84bb05a28f124629e2151007dfd1a07",
+    "extension/pc-resilience-content.js": "2ac1b519abd4bdf083e88f49f0ee69451be1237a162c102eda1bef70a83a76b6",
+    "extension/pc-resilience-core.js": "d47299dce2acb8f851e93d9c713b8cd5959adcffc6ce656ac3af45a77d3f9351",
+    "test/mobile-bridge.test.js": "323adfb0eea9275b41d7e666c1d01b0ceb3e845a3be1a3fc370630f16f07618f",
+    "test/pc-resilience.test.js": "8075ae7eaeda98b9a741a4b72767d419d6438232527047d4085f56a8cb09b401",
+    "scripts/test-mobile-structured-e2e.py": "ee8d8f54c7a24965deb34b06e0c2baa87d6e5133c9743c270b8ed307a4a496a0",
+    "scripts/test-pc-extension-resilience.py": "0b505426476e632a0a8b07ede6cad88aa7def13ef2b41efaf07f9a54ee95c8ae",
+    "scripts/mobile-e2e-server.mjs": "7e074ab167f03121b78c5f951dd886b6688cb5da24e21c66b47d3c29c03ea741"
+  }
+}

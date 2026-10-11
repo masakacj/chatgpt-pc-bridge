@@ -1,84 +1,74 @@
-# PC Bridge 开发交接
+# PC Bridge — implementation handoff, iteration 1
 
-## 最新交互约定：手机与 PC 共用一个绑定标签页（2026-10-11）
+## LATEST TAB POLICY — phone and PC share one bound tab (2026-10-11)
 
-用户允许手机操作与 PC 使用同一个 Chrome 标签页。**默认采用共享标签页模式，不再以助手此前建议的“桥接专用后台标签页”为开发前提。** 本节优先于旧计划中的专用 reader tab 建议。本次仅更新需求和 handoff，未实现或发布新的双向导航功能。
+User permits phone and PC operations on the SAME Chrome tab. Adopt shared-tab mode as the default; the previous assistant suggestion to mandate a dedicated/background reader tab is superseded. This is a requirement/handoff update only, not an implemented or deployed feature.
 
-- 首次选择一个现有 ChatGPT 标签页进行绑定，可优先提供当前页。手机切换对话、普通新建或项目内新建，操作的就是这个 PC 标签页，不自动另开后台页，也不因目标对话已在另一个标签打开就偷偷更换绑定。新聊天的正式对话 ID 在首次真实发送后核实，不预先伪造。
-- PC 在这个绑定标签页内切换对话，手机跟随显示新对话并重新订阅读取；不能只报路由失效后卡住，也不能自动把 PC 导回旧对话。PC 仅切到其他浏览器标签，不改变已绑定目标。
-- **手机草稿仍独立**：打字不写 PC，只有明确点击手机发送才填入 PC 并发送。PC 未发送的输入框文本不回填手机；PC 已发送的消息和助手回复正常同步为历史。手机按对话保存草稿，切换 A→B 不把 A 的草稿带到 B，旧回执不清空新草稿。
-- 只保留必要的目标对话/页面核对及输入占用提示，避免发送瞬间发生导航而误发。不默默覆盖 PC 尚未发送的文字，不自动重发，不为此增加编排器适配器或分布式锁框架。绑定页关闭后提示重新选择，不擅自镜像其他标签。
-- 验收聚焦：手机切 A→B 时同一 PC 标签跟随；PC 切 B→C 时手机跟随；切其他 Chrome 标签不劫持绑定；手机各对话草稿保留且 PC 草稿不反向同步；导航与发送交错时不串会话、不重复发送。
+- Bind one user-selected existing ChatGPT tab (offer the current ChatGPT tab initially). Phone conversation selection and ordinary/project new-chat actions navigate that SAME tab through the official UI; do not automatically create a reader tab or switch binding to another already-open tab containing the target. A new chat's permanent ID is confirmed after the first actual send, not fabricated.
+- Navigation inside the bound PC tab updates the native phone view and read subscription to its new conversation. Do not treat all PC route changes as permanent disconnects, and do not restore the old conversation over the user's new PC choice. Merely activating another Chrome tab does not change the binding.
+- Phone text stays local per conversation and is written to PC ONLY after explicit phone Send. PC unsent editor text never fills the phone composer. PC sent messages and replies do sync as history. Save phone draft A when moving to B; an old response/Send callback cannot overwrite B or send A's text there.
+- Use existing document/conversation checks and a brief actionable message for a PC draft/IME/active send conflict. Do not silently overwrite PC edits, invent background-tab fallback, add an executor adapter or a distributed locking framework. Closing the bound tab prompts for a new binding; do not pick an unrelated tab silently.
+- Focused acceptance: phone A->B visibly changes the same PC tab; PC B->C updates phone; other Chrome tab activation does not hijack it; per-chat phone drafts survive; PC unsent text never propagates; a route change racing with Send does not send in the wrong chat or replay.
 
-**当前0.1.0原型仍有“路由改变使订阅失效”和 preserveSource 创建 reader tab 的逻辑，上述共享标签页跟随规则尚待落实，不得把本节当成代码已完成。**
+Current0.1.0 code still invalidates subscriptions on route change and supports preserveSource reader-tab creation; implement the rules above before claiming shared-tab bidirectional navigation works. Retain the bridge-only scope correction below.
 
-## 最新范围纠正：只剥离桥接，不迁走编排器执行器（2026-10-11）
+## SCOPE CORRECTION — user: only extract the bridge (2026-10-11)
 
-用户明确纠正：**“为什么会影响编排器？只是要剥离桥接的部分。”**
+The user clarified: **do not migrate, replace or make an adapter out of the Orchestrator executor. Only extract the mobile/PC bridge.** The earlier single-production-extension/keep-the-old-ID-for-Bridge assumption was an assistant scope error, not a user requirement. It is superseded.
 
-之前把任务扩大为“以一个新扩展替换原 executor，再把编排器接成 optional adapter”，是助手划错拆分边界，**不是用户要求，也不是桥接独立化的必要条件**。取消该 adapter 工作及“所有功能必须共用同一扩展 ID”的限制。本文本节优先于旧迁移计划与旧 M3/M4 描述。
+Keep Orchestrator's existing extension, ID, task execution/queues, archive/delete, 3210 and `/executor` intact. Keep its existing PC resilience/state enhancement in place; do not duplicate that unrelated module in the new bridge. The independent Bridge extension gets its own ID and owns only paired message/history/project reads, explicit mobile actions, connection settings and independent3211 service. Two different-purpose extensions are permitted. What must not coexist is TWO active copies of mobile bridge handlers, duplicate status observers, or TWO writers owning the same3211/journal.
 
-### 保留与迁出
+At cutover remove/disable only the old mobile initialization/handlers and the embedded3211 listener. Retain all original orchestration code and service. The existing0.1.0 development package still includes copied resilience content and shared legacy `__ORCH_MOBILE_*` globals; slim that package and isolate bridge namespaces before co-installation. New extension storage is separate: migrate ONLY mobile Send/interaction reservations needed to reconcile pending receipts, retain server pairing/journal, and leave old executor storage/ID untouched. Existing task ownership/running/approval/draft checks need a small coordination check when both target the same tab, not a rewritten executor or universal adapter framework.
 
-| 保留在 Orchestrator，不替换 | 迁到独立 PC Bridge |
-|---|---|
-| 原 Chrome executor 扩展、原 ID、原存储 | 单独的桥接扩展及其独立 ID |
-| 3210 管理服务、原 `/executor` 通信 | 手机 `/v1/` 服务及独立3211进程 |
-| 工作流、任务队列、执行、结果收集、原归档/删除流程 | 手机配对、消息/历史/项目读取、手机明确触发的发送和交互 |
-| 现有 PC resilience 状态增强与安全读取恢复 | 桥接自己的设置、连接及发送回执 |
+**This turn corrects scope and handoff only; no new production deployment, code change or coexistence test is claimed.** Previous test counts below describe the0.1.0 isolated prototype, not the corrected two-extension installation.
 
-修正后是**两个职责不同的扩展并存**，而非把同一套桥接运行两遍。原 executor 继续执行原工作流，新 Bridge 只服务手机桥接。生产切换时，只移除或停用旧工程的 mobile bridge 初始化/消息处理和内嵌3211监听；不搬走或重构编排器其余逻辑。
+Date: 2026-10-11. Development version: **0.1.0**. This is implemented and locally tested, **not a production deployment or an iOS release**.
 
-新旧同时操作同一个目标对话时，只做必要的占用/生成/审批/输入检查，优先复用现有 busy 信号；不引入完整 executor adapter 或分布式锁框架。原扩展的状态/存储留在原处，新桥接只读取它需要的目标页快照；确实需要跨扩展元数据时再加小型只读接口。标签策略以上方共享标签页约定为准。
+## Where to continue
 
-### 对当前开发版的具体调整
+- PC development: `D:\workspace\py\chatgpt-pc-bridge`, mcpoffice workspace `ws_53924e782d`.
+- Existing production: `D:\workspace\py\chatgpt-orchestrator`, workspace `ws_1936350011`. Do not continue core Bridge development there.
+- GitHub repository: `masakacj/chatgpt-pc-bridge` now exists and has been initialized. **Full source publication is not complete yet**; the independent local workspace and complete development ZIP are the actual implementation at this milestone. Do not claim the remote repository can already build from a clean clone.
+- Original cross-platform requirements remain in `masakacj/chatgpt-web/docs/IOS_070_NATIVE_UX_PARITY_HANDOFF.md` and `docs/PC_CHROME_BRIDGE_DECOUPLING_HANDOFF.md`.
 
-独立服务、直连通道、配置页和桥接提取代码继续复用，不推倒重写。但已有0.1.0开发包仍默认加载复制的 PC resilience 模块，并使用旧 `__ORCH_MOBILE_*` 命名，**不可原样与旧插件并装**。下一步仅精简这些重复注册、隔离 bridge 命名，并在原插件停用旧 mobile 处理后验证共存。
+## Implemented
 
-旧 executor ID 与非桥接状态不用迁移。独立服务继续保留手机配对和服务端命令日志；新扩展只核对/迁移必要的 mobile Send/interaction 防重预约，未确认的旧命令不重发。这不是要求迁移整个 Chrome 扩展存储。
+1. `service/mobile-bridge.js`: extracted existing authenticated `/v1/` service with matching session, navigation, history, draft/send/interaction and receipt semantics. Added a server handle and disconnect invalidation for an independent transport. Malformed private JSON now fails instead of silently losing pairing or Send reservations.
+2. `service/standalone.js` and `server.js`: independent loopback Node service, `/bridge` WebSocket with extension-origin and distinct extension-key authentication, one connected executor, CLI configuration and process lifecycle. There is no import, request or fallback to Orchestrator's `3210/executor`.
+3. `extension/background.js` and `bridge-connection.js`: real standalone MV3 worker, direct service connection, bounded reconnection, 20-second transport heartbeat, no write replay queue. Existing mobile controller and native state modules are reused, not redesigned.
+4. `extension/options.*`: local service/key configuration and connection status; no website credentials. Development manifest excludes legacy debugger and GitHub runtime-download permissions.
+5. `source-imports.json`: SHA-pinned read-only extraction inputs for unchanged existing modules and regression fixtures. `scripts/build.mjs` assembles a complete runnable **dist artifact**, never overwrites the old production sources. The published source must vendor these exact files before claiming independent clean-clone builds.
+6. Standalone HTTP/WebSocket tests, actual standalone-extension browser test, reusable old regression suites, syntax/architecture checks, package ZIP/CRC/SHA tooling, and a prepared CI workflow. CI configuration is written but no successful GitHub CI run is claimed.
 
-**范围纠正只更新 handoff，未改运行代码、未切换生产、未宣称两个扩展共存已测试。** 以下测试结果仅对应之前的0.1.0隔离原型，不等于修正范围后的生产共存验收。
+## Tests actually observed
 
-## 实际代码与继续入口
-
-- 独立项目：mcpoffice `D:\workspace\py\chatgpt-pc-bridge`，workspace `ws_53924e782d`。
-- 本地交接：`docs/HANDOFF.md`；机器可读记录：`DEVELOPMENT_STATUS.json`。
-- 原编排器保留：`D:\workspace\py\chatgpt-orchestrator`，workspace `ws_1936350011`。
-- 本 GitHub 仓库已初始化，上一轮完整源码尚未上传。实际实现及完整构建产物在独立工作区；继续开发前按实际文件核对，不重建项目。
-
-## 第一轮已有实现（0.1.0开发版，未生产部署）
-
-1. `service/mobile-bridge.js`：提出 `/v1/` 鉴权、会话、历史、draft/send/interact 和持久回执服务，保持旧手机客户端协议。
-2. `service/standalone.js`、`service/server.js`：独立 Node 进程、loopback 监听、`/bridge` 扩展专用 WebSocket，不经 Orchestrator `3210/executor`。
-3. `extension/background.js`、`bridge-connection.js`：真实 MV3 后台、连接及重连、无发送重放队列。复制的 PC resilience 注册需按范围纠正移除，新插件只保留 bridge。
-4. `extension/options.*`：设置本机服务、扩展连接 Key 和连接状态。
-5. 构建、语法检查、测试、ZIP/CRC/SHA 打包及 CI 配置。初始 `source-imports.json` 按固定 SHA 只读复用旧模块，发布完整源码时需纳入所需的 bridge 文件，不再扩张到整套 executor。
-
-## 第一轮实测记录（历史结果）
-
-| 项目 | 结果 | 范围 |
+| Suite | Result | Meaning |
 |---|---|---|
-| Node 合并回归 | 37/37通过 | 29项原协议/状态＋8项独立服务 |
-| 移动端 Chromium MV3 回归 | 23/23通过 | 模拟页面中的提取、侧栏、编辑器、IME、交互、历史、单次发送 |
-| 实际新独立扩展＋独立服务 | 6/6通过 | 使用真实 manifest/background/options 的隔离测试 |
-| JavaScript 检查 | 22个文件通过 | 语法与独立核心通信路径 |
-| 原生状态 Chromium 全量回归 | 未完成 | 90秒工具超时，不能当作本轮通过 |
+| Existing protocol + native-state Node tests | 29/29 PASS | Selected extracted modules; not all Orchestrator workflow tests |
+| New independent service transport tests | 8/8 PASS | Authentication, second-executor rejection, HTTP/WS reads, one Send, persisted receipt/unknown result, restart and private-state failure |
+| Existing real Chromium MV3 + Node regression | 23/23 PASS | Local synthetic page; editor, sidebar, source-preserving navigation, history, IME, approval and Send guards |
+| Actual new standalone extension + independent service | 6/6 PASS | Real options/worker/HTTP/WS/extractor/editor/reply, duplicate suppression, 35-second MV3 idle window, process restart with receipt/pairing retained |
+| Older full native-state Chromium suite | NOT COMPLETE | Tool invocation reached its 90-second timeout; do not report the previous historical 19/19 as this iteration's result. Re-run with a sufficient timeout before production cutover. |
 
-新独立链路验证了读取 → 写测试文本 → Send仅点击一次 → 收到回复，重复 commandId不重复发送；35秒MV3空闲窗口后仍可读取；独立服务重启后配对/回执保留。临时Profile与本地HTML测试页面，1条模拟消息，0条真实用户消息。原生产编排器未为该测试停机。
+The actual new-worker test launches the independent service on a temporary loopback port and a fresh isolated Chromium Profile. All ChatGPT URLs are fulfilled with local fixture HTML. It performs **one fixture Send and zero real user/account Sends**. The test does not stop the production Orchestrator; independence is established by the isolated service entrypoint and worker having no Orchestrator transport/import path.
 
-## 第一轮开发包（历史，不是修正后的可并装版本）
+Commands: `npm test`, `npm run check`, `npm run test:browser`, `npm run test:legacy`, `npm run test:resilience`, `npm run package`.
 
-`D:\workspace\py\chatgpt-pc-bridge\dist\ChatGPT-PC-Bridge-0.1.0-dev.zip`
+## Production unchanged
 
-84,632字节，38文件，ZIP CRC通过；SHA256 `acdc4f3ca1323fb5ce0e5e714389f8903c9667713ea9245ae53b87e0c28a8d34`。无node_modules、用户Key、命令日志或Profile。不可将此旧包宣称为bridge-only共存正式版。
+At the initial live check: `/api/health` reported one production executor `pc-extension-v43-mobile-controls`, zero Orchestrator runs. This iteration does not overwrite/reload the installed extension, stop its server, change the production extension ID, copy pairing/journal data, change NPM/WireGuard/DNS, navigate user chats or publish an IPA. The new Bridge must NOT replace the production executor at all. The previously proposed executor adapter is canceled by the scope correction. Deploy a separate bridge-only extension after disabling the old mobile handlers and validating coexistence; preserve the original executor.
 
-## 下一步（已替换错误的 adapter 前置任务）
+## Source/publication status
 
-1. 在现有独立工作区精简为bridge-only：去掉重复PC resilience内容注册，隔离旧mobile globals，保留已经跑通的独立服务/连接/提取；完成所需源码发布。
-2. 原工程只停用旧mobile初始化、转发与3211监听，原executor/3210/任务逻辑不动。准备新Bridge独立ID的手机桥接预约/回执衔接，不迁移原executor身份。
-3. 做有针对性的共存回归：原编排工作流仍能运行、新Bridge读取和明确发送正常、共享标签页双向切换正常，同一对话不会互相覆盖或重复发送、手机配对与旧回执不丢。再执行受控切换。
-4. 接续iOS0.7手机独立草稿、仅发送时提交、历史检索、普通和项目新建、官方式原生布局。默认与PC共享一个绑定标签页，不强制专用后台页。当前仍无上述iOS源码修改或新IPA。
+The first Windows source-publish attempt had no available authenticated GitHub CLI/credential session. An existing authenticated GitHub CLI was identified on mcpdebian; credentials were not copied to Windows or committed. The repository was verified and initialized via the GitHub connector. **Only repository initialization and handoff publication are claimed here; complete source import remains pending.**
 
-生产上次复核为1个executor、`pc-extension-v43-mobile-controls`、0个运行工作流；这是上一轮观察，不是本次新增现场验收。没有因为本次文档更新而重载扩展、重启Chrome、改网络或用户数据。
+The development ZIP contains the full extracted source and tests (without runtime state or node_modules), and its `.sha256` sits beside it under `dist/`. Do not create another repository or redo dependency discovery. Use the existing repository and prepared source inventory; preserve the exact tested contents. Publishing and deployment are separate steps.
 
-记录每轮实际代码、准确测试、commit/包、是否部署和下一步；不要为桥接拆分重构整个编排器，也不要重新展开已经取消的“optional executor adapter”任务。
+## Next shortest path
+
+1. Finish complete GitHub source import, verify source hashes/build from the independent repository, and run the prepared CI. Keep the existing local implementation; do not reconstruct it from chat prose.
+2. Slim the new extension to mobile bridge functions only; remove duplicate PC resilience initialization/content registration, separate legacy mobile globals, and retain the existing executor in its original project. No Orchestrator adapter work.
+3. Stage the independent bridge extension with its own ID and independent3211 service. Disable ONLY the old mobile handlers/listener; keep Orchestrator3210 and executor unchanged. Preserve the server pairing/journal and reconcile mobile-only extension reservations. Test original workflow operation alongside bridge reads/explicit sends, including same-tab contention. Do not migrate the old executor ID/state.
+4. Continue iOS 0.7.0: phone-only drafts and explicit compose/send; global history via verified official UI; ordinary/project new chat; official-like native layout and keyboard behavior. **These new iOS features have not been implemented in this iteration.**
+
+Do not duplicate the work above or repeat legacy full-system audits before editing a small changed module. Keep handoff updates factual: changed files, exact tests, commit/ZIP, deployed yes/no and next step. Keep the essential protections against duplicate Send, wrong-chat writes and data loss, without adding speculative layers.

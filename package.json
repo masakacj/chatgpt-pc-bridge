@@ -1,0 +1,20 @@
+{
+  "name": "chatgpt-pc-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone ChatGPT Chrome bridge and local mobile companion service",
+  "type": "module",
+  "engines": {"node": ">=22"},
+  "scripts": {
+    "start": "node service/server.js",
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test dist/bridge/test/*.test.js",
+    "test:browser": "npm run build && python dist/bridge/scripts/test-standalone-browser.py",
+    "test:legacy": "npm run build && python dist/bridge/scripts/test-mobile-structured-e2e.py",
+    "test:resilience": "npm run build && python dist/bridge/scripts/test-pc-extension-resilience.py",
+    "check": "npm run build && node scripts/check.mjs",
+    "package": "npm run build && python scripts/package.py",
+    "publish:source": "node scripts/publish-source.mjs"
+  },
+  "dependencies": {"express": "5.1.0", "ws": "8.18.3"}
+}

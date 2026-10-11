@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+.env
+.env.*
+*.log
+__pycache__/
+*.pyc
+.browser-profile/
+playwright-report/
+test-results/
