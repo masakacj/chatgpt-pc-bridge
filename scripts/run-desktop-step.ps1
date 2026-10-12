@@ -1,5 +1,11 @@
 param([ValidateSet('inspect','install','configure','test-page','reload')][string]$Step='inspect',[int]$Port=13213)
 $ErrorActionPreference='Stop'
+# Reload never enters the interactive desktop task or UI automation path.
+if($Step -eq 'reload'){
+ $maintenance=Join-Path (Split-Path (Split-Path -Parent $PSScriptRoot) -Parent) 'igg-workflow\scripts\reload-browser-extension.mjs'
+ & node $maintenance 'pc-bridge' '--port' $Port
+ exit $LASTEXITCODE
+}
 $root=Split-Path -Parent $PSScriptRoot
 $script=Join-Path $PSScriptRoot 'desktop-bridge.ps1'
 $folder=Join-Path $root 'var';New-Item -ItemType Directory -Path $folder -Force|Out-Null

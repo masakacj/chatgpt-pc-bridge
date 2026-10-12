@@ -5,7 +5,7 @@ Private IDs/results live under excluded var/stage. Public output is counts only.
 from pathlib import Path
 import argparse,hashlib,json,time,urllib.request,urllib.error,urllib.parse,uuid
 ROOT=Path(__file__).resolve().parent.parent
-parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=13213);parser.add_argument('--query',default='ChatGPT');parser.add_argument('--pages',type=int,default=3);parser.add_argument('--search-only',action='store_true');parser.add_argument('--fresh-tab',action='store_true');args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=13213);parser.add_argument('--query',default='ChatGPT');parser.add_argument('--pages',type=int,default=3);parser.add_argument('--search-only',action='store_true');parser.add_argument('--fresh-tab',action='store_true');parser.add_argument('--chat-title',default='');parser.add_argument('--project-only',action='store_true');args=parser.parse_args()
 folder=ROOT/'var/stage';state=json.loads((folder/'r1-r2-evidence.json').read_text(encoding='utf8'))
 key=json.loads((folder/'pairing.json').read_text(encoding='utf-8-sig'))['token'];base=f'http://127.0.0.1:{args.port}'
 def req(route,body=None,method=None):
@@ -49,29 +49,29 @@ def action(kind,**values):
     s=fresh();return checked(prefix+'/actions',{'action':kind,'commandId':str(uuid.uuid4()),'documentId':s['documentId'],**values})
 try:
     initial=fresh(original);assert not initial['pcDraftOccupied'],'Do not navigate over a PC draft'
-    catalog=action('catalog');assert original in {c['id'] for c in catalog['chats']},'Return target must be observed in official sidebar'
-    query='__BRIDGE_NO_RESULT_'+uuid.uuid4().hex+'__'
-    empty=action('search',query=query)
-    emit('empty_search',count=len(empty.get('chats',[])),loading=empty.get('loading'),emptyConfirmed=empty.get('emptyConfirmed'),hasMore=empty.get('hasMore'),source=empty.get('source'))
-    results=action('search',query=args.query);all_items={x['id']:x for x in results.get('chats',[])}
-    emit('search_initial',count=len(all_items),loading=results.get('loading'),emptyConfirmed=results.get('emptyConfirmed'),hasMore=results.get('hasMore'),source=results.get('source'))
-    for page in range(min(5,max(0,args.pages))):
-        if not results.get('hasMore'):break
-        prev=set(all_items);results=action('search',query=args.query,more=True);all_items.update({x['id']:x for x in results.get('chats',[])})
-        emit('search_more',page=page+1,pageCount=len(results.get('chats',[])),newUnique=len(set(all_items)-prev),totalUnique=len(all_items),hasMore=results.get('hasMore'),loading=results.get('loading'))
-        if prev==set(all_items) and not results.get('loading'):break
-    # A second zero-result query must not return stale hits from the previous query.
-    empty2=action('search',query=query+'2')
-    emit('search_after_results_empty',count=len(empty2.get('chats',[])),loading=empty2.get('loading'),emptyConfirmed=empty2.get('emptyConfirmed'),hasMore=empty2.get('hasMore'))
+    catalog=action('catalog');assert initial.get('route') and initial['conversationId']==original,'Return target must be observed as the bound official page'
+    if not args.project_only:
+        query='__BRIDGE_NO_RESULT_'+uuid.uuid4().hex+'__'
+        empty=action('search',query=query)
+        emit('empty_search',count=len(empty.get('chats',[])),loading=empty.get('loading'),emptyConfirmed=empty.get('emptyConfirmed'),hasMore=empty.get('hasMore'),source=empty.get('source'))
+        results=action('search',query=args.query);all_items={x['id']:x for x in results.get('chats',[])}
+        emit('search_initial',count=len(all_items),loading=results.get('loading'),emptyConfirmed=results.get('emptyConfirmed'),hasMore=results.get('hasMore'),source=results.get('source'))
+        for page in range(min(5,max(0,args.pages))):
+            if not results.get('hasMore'):break
+            prev=set(all_items);results=action('search',query=args.query,more=True);all_items.update({x['id']:x for x in results.get('chats',[])})
+            emit('search_more',page=page+1,pageCount=len(results.get('chats',[])),newUnique=len(set(all_items)-prev),totalUnique=len(all_items),hasMore=results.get('hasMore'),loading=results.get('loading'))
+            if prev==set(all_items) and not results.get('loading'):break
+        empty2=action('search',query=query+'2')
+        emit('search_after_results_empty',count=len(empty2.get('chats',[])),loading=empty2.get('loading'),emptyConfirmed=empty2.get('emptyConfirmed'),hasMore=empty2.get('hasMore'))
     if args.search_only:raise SystemExit(0)
     catalog=action('catalog')
     project=next((p for p in catalog.get('projects',[]) if 'chatgpt' in p['title'].lower().replace(' ','')),None)
     if project:
         expanded=action('project',projectId=project['id']);choices=[c for c in expanded.get('chats',[]) if (c.get('projectId') or '').startswith(project['id']) and c['id']!=original]
-        selected=next((c for c in choices if '脚本' in c['title'] or '优化' in c['title']),choices[-1] if choices else None)
+        selected=next((c for c in choices if args.chat_title and args.chat_title in c['title']),None) if args.chat_title else next((c for c in choices if '脚本' in c['title'] or '优化' in c['title']),choices[-1] if choices else None)
         if selected:
             action('open',targetConversationId=selected['id']);s=fresh(selected['id'])
-            emit('project_older_chat',sameTab=True,projectMatches=bool((s.get('projectId') or '').startswith(project['id'])),messageCount=len(s['messages']),status=s['status'],pcDraftOccupied=s['pcDraftOccupied'])
+            emit('project_older_chat',sameTab=True,projectMatches=bool((s.get('projectId') or '').startswith(project['id'])),messageCount=len(s['messages']),status=s['status'],pcDraftOccupied=s['pcDraftOccupied'],historyLayout=s.get('historyLayout'))
             seen={m['id'] for m in s['messages']};cursor=s.get('historyCursor');has_more=s.get('hasOlder');seen_cursors=set();pages=0
             while has_more and cursor and cursor not in seen_cursors and pages<5:
                 seen_cursors.add(cursor);q=urllib.parse.urlencode({'before':cursor,'documentId':s['documentId']})
@@ -82,15 +82,19 @@ try:
                 emit('history_page',page=pages+1,http=200,count=len(items),duplicateMessages=overlap,documentMatches=result['documentId']==s['documentId'],conversationMatches=result['conversationId']==s['conversationId'],hasMore=result['hasMore'],cursorAdvanced=result.get('cursor')!=cursor)
                 pages+=1;cursor=result.get('cursor');has_more=result.get('hasMore')
             emit('history_summary',pages=pages,totalUniqueMessages=len(seen),hasMore=bool(has_more),sourceLimitedToLoadedWebHistory=True)
+            assert s['messages'],'An existing chat must yield actual messages for acceptance'
         else:emit('project_older_chat',available=False)
     else:emit('project_older_chat',projectAvailable=False)
 finally:
     try:
         now=fresh()
-        if now['conversationId']!=original and not now['pcDraftOccupied']:
-            action('open',targetConversationId=original)
-        restored=fresh(original)
-        after={t['tabId'] for t in checked('/v1/tabs?shared=1')['tabs']}
-        report['restoredOriginal']=restored['conversationId']==original;report['tabSetUnchanged']=after==before_tabs;report['completedAt']=time.time();save()
-        print(json.dumps({'restoredOriginal':report['restoredOriginal'],'tabSetUnchanged':report['tabSetUnchanged'],'realUserMessagesSent':0}),flush=True)
+        if now['conversationId']!=original and now['pcDraftOccupied']:
+            report.update({'restoredOriginal':False,'returnDeferred':'pc_draft_appeared','completedAt':time.time()});save()
+            print(json.dumps({'restoredOriginal':False,'returnDeferred':'pc_draft_appeared','pcDraftPreserved':True,'realUserMessagesSent':0}),flush=True)
+        else:
+            if now['conversationId']!=original:action('open',targetConversationId=original)
+            restored=fresh(original)
+            after={t['tabId'] for t in checked('/v1/tabs?shared=1')['tabs']}
+            report['restoredOriginal']=restored['conversationId']==original;report['tabSetUnchanged']=after==before_tabs;report['completedAt']=time.time();save()
+            print(json.dumps({'restoredOriginal':report['restoredOriginal'],'tabSetUnchanged':report['tabSetUnchanged'],'realUserMessagesSent':0}),flush=True)
     finally:req(prefix,method='DELETE')

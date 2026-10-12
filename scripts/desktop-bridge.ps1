@@ -1,5 +1,10 @@
 param([ValidateSet('inspect','install','configure','test-page','reload')][string]$Step='inspect',[int]$Port=13213)
 $ErrorActionPreference='Stop'
+# Preserve install/configure tools, but never use foreground UI for reload.
+if($Step -eq 'reload'){
+ & node 'D:\workspace\py\igg-workflow\scripts\reload-browser-extension.mjs' 'pc-bridge' '--port' $Port
+ exit $LASTEXITCODE
+}
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms

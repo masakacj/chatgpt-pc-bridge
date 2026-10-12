@@ -29,6 +29,12 @@ if($Action -eq 'status'){
 if($Action -eq 'stop'){
   if(-not (Test-Path -LiteralPath $meta)){throw 'No owned Bridge process record'}
   $m=Get-Content -LiteralPath $meta -Raw | ConvertFrom-Json
+  if($m.supervised){
+    $task=Get-ScheduledTask -TaskName 'ChatGPT-PC-Bridge' -ErrorAction SilentlyContinue
+    if(-not $task -or -not $task.Actions[0].Arguments.Contains('"'+$DataDirectory+'"')){throw 'Supervised process has no matching owned task; stop its supervisor first'}
+    Disable-ScheduledTask -TaskName $task.TaskName | Out-Null
+    Stop-ScheduledTask -TaskName $task.TaskName
+  }
   $p=Get-CimInstance Win32_Process -Filter "ProcessId=$($m.pid)"
   if($p -and ($p.Name -ne 'node.exe' -or $p.CommandLine -notlike "*$entry*")){throw 'Recorded PID no longer belongs to Bridge'}
   if($p){Stop-Process -Id $p.ProcessId -ErrorAction Stop}
@@ -39,13 +45,14 @@ if($Action -eq 'install-startup'){
   if($Port -ne 3211){throw 'Only the verified final service may be registered for startup'}
   Initialize-PrivateDirectory
   $taskName='ChatGPT-PC-Bridge'
-  $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$PSCommandPath+'" -Action start -Port 3211 -DataDirectory "'+$DataDirectory+'" -ExtensionId '+$ExtensionId
+  $runner=Join-Path $PSScriptRoot 'run-service.ps1'
+  $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$runner+'" -Port 3211 -DataDirectory "'+$DataDirectory+'" -ExtensionId '+$ExtensionId
   $taskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $args -WorkingDirectory $root
   $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
   $trigger=New-ScheduledTaskTrigger -AtStartup
-  $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+  $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartInterval (New-TimeSpan -Minutes 1) -RestartCount 999
   Register-ScheduledTask -TaskName $taskName -Action $taskAction -Principal $principal -Trigger $trigger -Settings $settings -Description 'Independent local ChatGPT mobile Bridge; does not start or stop Orchestrator.' -Force | Out-Null
-  [pscustomobject]@{startupRegistered=$true;task=$taskName;port=3211}|ConvertTo-Json -Compress
+  [pscustomobject]@{startupRegistered=$true;task=$taskName;port=3211;supervisedProcess=$true;executionTimeLimit='PT0S';restartInterval='PT1M';restartCount=999}|ConvertTo-Json -Compress
   exit
 }
 if(-not (Test-Path -LiteralPath $entry)){throw 'Stage the tested runtime before starting'}
@@ -53,6 +60,16 @@ $s=Get-BridgeStatus
 if($s){[pscustomobject]@{alreadyRunning=$true;pid=$s.pid;version=$s.version;port=$Port}|ConvertTo-Json -Compress;exit}
 $listeners=Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if($listeners){throw 'Loopback port is already owned by another process'}
+if($Port -eq 3211){
+  $task=Get-ScheduledTask -TaskName 'ChatGPT-PC-Bridge' -ErrorAction SilentlyContinue
+  if($task){
+    if(-not $task.Actions[0].Arguments.Contains('"'+$DataDirectory+'"')){throw 'Registered task data directory does not match'}
+    Enable-ScheduledTask -TaskName $task.TaskName|Out-Null
+    Start-ScheduledTask -TaskName $task.TaskName
+    for($i=0;$i -lt 25;$i++){Start-Sleep -Milliseconds 200;$s=Get-BridgeStatus;if($s){[pscustomobject]@{started=$true;pid=$s.pid;port=$Port;version=$s.version;supervised=$true}|ConvertTo-Json -Compress;exit}}
+    throw 'Scheduled Bridge did not become healthy'
+  }
+}
 Initialize-PrivateDirectory
 $env:BRIDGE_PORT=[string]$Port
 $env:BRIDGE_DATA_DIR=$DataDirectory

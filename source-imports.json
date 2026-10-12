@@ -1,6 +1,6 @@
 {
   "description": "One-time, SHA-pinned read-only import of existing modules. Builds write dist only. Source publication vendors these exact files into the independent repository; a clean clone has no Orchestrator dependency.",
-  "sourceRoot": "../chatgpt-orchestrator",
+  "sourceRoot": "./dist/bridge",
   "files": {
     "extension/mobile-structure-content.js": "ebf9db6a503677414da0ac8f07b65ed3fe886663bb5c306b0b8a71d98d0fcfd1",
     "extension/mobile-presentation.js": "5ad3efe75b78d0473bb974a8e4777faa42cb13796910ad7e4cb29a0b9d4d7b11",

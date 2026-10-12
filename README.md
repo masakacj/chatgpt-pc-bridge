@@ -1,6 +1,6 @@
 # ChatGPT PC Bridge
 
-Independent Chrome MV3 bridge and local Node companion service. Current development version **0.2.3**. The installed extension runs against a staged loopback service; this is **not a new iOS release or a completed production cutover**. Read [docs/HANDOFF.md](docs/HANDOFF.md) for exact live status and [the R0–R6 plan](docs/NEXT_DEVELOPMENT_PLAN_20261012.md) for remaining work.
+Independent Chrome MV3 bridge and local Node companion service. Current development version **0.2.5**. The installed extension runs against a staged loopback service; this is **not a new iOS release or a completed production cutover**. Read [docs/HANDOFF.md](docs/HANDOFF.md) for exact live status and [the R0–R6 plan](docs/NEXT_DEVELOPMENT_PLAN_20261012.md) for remaining work.
 
 ## Scope
 
@@ -10,7 +10,7 @@ The original Orchestrator executor, its extension ID, workflow queue, 3210 servi
 
 ## Build and tests
 
-Use Node 22+ and Python with Playwright Chromium. `npm ci --ignore-scripts`, `npm test`, and `npm run check` build and check the complete source inventory. Additional focused suites are `npm run test:shared`, `npm run test:search`, `npm run test:modern-user`, `npm run test:coexistence`, `npm run test:browser`, and `npm run test:legacy`. `npm run package` creates a ZIP and SHA-256 under `dist/`.
+Use Node 22+ and Python with Playwright Chromium. `npm ci --ignore-scripts`, `npm test`, and `npm run check` build and check the complete source inventory. Additional focused suites are `npm run test:shared`, `npm run test:search`, `npm run test:history`, `npm run test:modern-user`, `npm run test:coexistence`, `npm run test:browser`, and `npm run test:legacy`. `npm run package` creates a ZIP and SHA-256 under `dist/`.
 
 The published repository contains the extracted modules and does not need an Orchestrator checkout to build. `source-imports.json` records one-time SHA-pinned provenance for the original extraction workspace; when local canonical files exist, those files take precedence. CI checks a clean checkout, not a deployment folder. Export includes PowerShell deployment scripts, but excludes `var/`, `runtime/`, credentials, journals, browser profiles and diagnostic artifacts.
 
@@ -23,6 +23,8 @@ The extension options page accepts the local `ws://127.0.0.1:PORT/bridge` endpoi
 The service keeps the previous draft/send protocol for old-client compatibility. The new shared-tab client explicitly negotiates `shared-tab-v1`, binds with `followTab: true`, and submits a single `compose` command. Unknown or unconfirmed commands are looked up, never automatically replayed.
 
 ## Development focus
+
+0.2.5 retains background reload, restores initially open search pages, remembers observed routes across full document reload, and tests 90 loaded messages across history pages. A lightweight Windows scheduled runner now supervises its own Node child; crash recovery was verified on an isolated test port, not production3211. See `docs/RECOVERY_025_HANDOFF.md` for exact acceptance and remaining limitations.
 
 0.2.3 adds bounded search-result waits, empty/pagination handling and preservation of the conversation while official search hides its transcript. A separately signed iOS 0.7.0 Build1 candidate exists; stable latest and production3211 remain unchanged. See the current handoff before installation or cutover.
 

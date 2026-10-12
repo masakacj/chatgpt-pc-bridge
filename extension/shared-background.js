@@ -2,8 +2,23 @@
 export function startSharedBridge({send}) {
  const sessions=new Map();
  const urlInfo=url=>{try{const u=new URL(url);if(u.origin!=='https://chatgpt.com')return null;return {route:u.pathname,conversationId:u.pathname.match(/(?:^|\/)c\/([A-Za-z0-9_-]{12,80})(?:\/|$)/)?.[1]||''}}catch{return null}};
- const call=async(s,payload)=>{const r=await chrome.tabs.sendMessage(s.tabId,{...payload,type:'shared_page',sessionId:s.id});if(!r?.ok)throw Error(r?.error||'page_not_ready');return r.result};
- function forward(s,snapshot){if(!snapshot)return;send({type:'mobile_snapshot',sessionId:s.id,tabId:s.tabId,snapshot:{...snapshot,bindingRevision:s.epoch}})}
+ // Keep only routes actually observed in this bound tab. A full document
+ // navigation must not invalidate the phone's already displayed history list.
+ function remember(s,result){
+  const entries=[...(result?.chats||[])];
+  if(result?.snapshot?.conversationId)entries.push({id:result.snapshot.conversationId,path:result.snapshot.route});
+  for(const entry of entries){
+   if(typeof entry.path!=='string'||!/^\/(?:g\/g-p-[A-Za-z0-9_-]+\/)?c\/[A-Za-z0-9_-]{12,80}\/?$/.test(entry.path))continue;
+   const observed=urlInfo('https://chatgpt.com'+entry.path);if(observed?.conversationId!==entry.id)continue;
+   s.observed.set(entry.id,entry.path);
+  }
+  while(s.observed.size>2000)s.observed.delete(s.observed.keys().next().value);
+ }
+ const call=async(s,payload)=>{
+  const r=await chrome.tabs.sendMessage(s.tabId,{...payload,type:'shared_page',sessionId:s.id,observedPath:payload.action==='open'?s.observed.get(payload.targetConversationId):undefined});
+  if(!r?.ok)throw Error(r?.error||'page_not_ready');remember(s,r.result);return r.result;
+ };
+ function forward(s,snapshot){if(!snapshot)return;remember(s,{snapshot});send({type:'mobile_snapshot',sessionId:s.id,tabId:s.tabId,snapshot:{...snapshot,bindingRevision:s.epoch}})}
  async function attach(s){
   if(s.attaching)return s.attaching;
   const epoch=s.epoch;
@@ -30,7 +45,7 @@ export function startSharedBridge({send}) {
   if(b.action==='subscribe'){
    if(!Number.isInteger(b.tabId))throw Error('invalid_tab');
    if([...sessions.values()].some(s=>s.tabId===b.tabId&&s.id!==b.sessionId&&s.expiresAt>Date.now()))throw Error('tab_already_paired');
-   const s={id:b.sessionId,tabId:b.tabId,expiresAt:Math.min(Date.now()+90000,b.expiresAt),readOnly:b.readOnly===true,ready:false,epoch:0,chain:Promise.resolve()};sessions.set(s.id,s);
+   const s={id:b.sessionId,tabId:b.tabId,expiresAt:Math.min(Date.now()+90000,b.expiresAt),readOnly:b.readOnly===true,ready:false,epoch:0,observed:new Map(),chain:Promise.resolve()};sessions.set(s.id,s);
    try{return await pageReady(s)}catch(e){sessions.delete(s.id);throw e;}
   }
   const s=sessions.get(b.sessionId);if(!s||s.tabId!==b.tabId)throw Error('session_expired');
@@ -39,8 +54,8 @@ export function startSharedBridge({send}) {
   if(s.expiresAt<Date.now())throw Error('session_expired');
   if(b.action==='refresh')return pageReady(s);
   const write=['compose','interact'].includes(b.action),navigation=['open','new','project'].includes(b.action);
-  if(write&&(!s.ready||s.attaching)){
-   try{await pageReady(s)}catch{return {status:b.action==='compose'?'not_sent':'not_acted',error:'page_loading'}}
+  if((write||navigation)&&(!s.ready||s.attaching)){
+   try{await pageReady(s)}catch{if(write)return {status:b.action==='compose'?'not_sent':'not_acted',error:'page_loading'};throw Error('page_loading');}
   }
   if(!s.ready||s.attaching){if(write)return {status:b.action==='compose'?'not_sent':'not_acted',error:'page_loading'};throw Error('page_loading');}
   if((write||navigation)&&s.readOnly)throw Error('read_only');
@@ -55,9 +70,17 @@ export function startSharedBridge({send}) {
   }
   try{result=await call(s,b);}catch(e){
    if(!navigation)throw e;
-   const tab=await chrome.tabs.get(s.tabId),current=urlInfo(tab.url||tab.pendingUrl);
-   const reached=b.action==='open'?current?.conversationId===b.targetConversationId:b.action==='new'?current&&current.conversationId===''&&(!b.projectId||current.route.startsWith('/g/'+b.projectId)):false;
-   if(!reached)throw e;return pageReady(s);
+   // A hard navigation closes the old content message port before Chrome
+   // updates tab.url. Read the pending/committed route briefly; never click again.
+   for(let i=0;i<18;i++){
+    const tab=await chrome.tabs.get(s.tabId),current=urlInfo(tab.pendingUrl||tab.url);
+    const reached=b.action==='open'?current?.conversationId===b.targetConversationId:b.action==='new'?current&&current.conversationId===''&&(!b.projectId||current.route.startsWith('/g/'+b.projectId)):false;
+    if(reached)return pageReady(s);
+    if(['pc_draft_blocks_navigation','pc_composing','conversation_not_observed','project_not_observed'].includes(e.message))throw e;
+    if(Date.now()>b.deadline)break;
+    await new Promise(r=>setTimeout(r,100));
+   }
+   throw e;
   }
   if(result?.snapshot){result.snapshot={...result.snapshot,bindingRevision:s.epoch};forward(s,result.snapshot);}return result;
  }
@@ -85,5 +108,5 @@ export function startSharedBridge({send}) {
  });
  chrome.tabs.onRemoved.addListener(tabId=>{for(const s of sessions.values())if(s.tabId===tabId){sessions.delete(s.id);send({type:'mobile_tab_changed',sessionId:s.id,tabId,closed:true})}});
  function disconnected(){for(const s of sessions.values())call(s,{action:'unsubscribe'}).catch(()=>{});sessions.clear();}
- return {handle,disconnected,audit:()=>({version:'0.2.3',sharedSessions:sessions.size})};
+ return {handle,disconnected,audit:()=>({version:'0.2.5',sharedSessions:sessions.size})};
 }

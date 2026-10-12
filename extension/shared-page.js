@@ -2,12 +2,16 @@
 (() => {
  'use strict';
  if(location.origin!=='https://chatgpt.com'||window!==top)return;
- if(globalThis.__CGPT_SHARED_PAGE__?.version==='0.2.3-r2.3')return;
+ if(globalThis.__CGPT_SHARED_PAGE__?.version==='0.2.5-r2.1')return;
  globalThis.__CGPT_SHARED_PAGE__?.destroy?.();
  const p=globalThis.__CGPT_BRIDGE_PRESENTATION__;if(!p)return;
  const ids=new WeakMap(),commands=new Map(),known=new Map();
  const idFor=n=>{if(!ids.has(n))ids.set(n,crypto.randomUUID());return ids.get(n)};
- const transcript=()=>[...document.querySelectorAll('main [class*="transcriptContent"]')].find(p.visible)||[...document.querySelectorAll('main')].find(p.visible)||null;
+ const layoutVisible=n=>n?.isConnected&&n.getClientRects().length>0&&!n.closest('[hidden]')&&getComputedStyle(n).visibility!=='hidden';
+ const transcript=()=>{
+  const roots=[...document.querySelectorAll('main [class*="transcriptContent"]')],mains=[...document.querySelectorAll('main')];
+  return roots.find(p.visible)||mains.find(p.visible)||(searchSurface()?(roots.find(layoutVisible)||mains.find(layoutVisible)):null)||null;
+ };
  const turns=()=>[...transcript()?.querySelectorAll('[data-turn-key],[data-testid^="conversation-turn-"],article[data-scroll-anchor]')||[]];
  const turnID=n=>n?.getAttribute('data-turn-key')||n?.getAttribute('data-testid')||(n?idFor(n):null);
  const conversation=()=>location.pathname.match(/(?:^|\/)c\/([A-Za-z0-9_-]{12,80})(?:\/|$)/)?.[1]||'';
@@ -66,37 +70,44 @@
   const stop=[...scope().querySelectorAll('button')].some(b=>p.visible(b)&&(/^(?:停止|停止生成|Stop|Stop generating)$/i.test(label(b))||b.getAttribute('data-testid')==='stop-button'));
   return stop||['in_progress','running','streaming'].includes(raw)?'running':['complete','completed'].includes(raw)?'completed':'idle';
  }
+ function historyViewport(){
+  for(let n=transcript();n&&n!==document.body;n=n.parentElement){
+   if(n.clientHeight>0&&n.scrollHeight>n.clientHeight+8&&/(auto|scroll)/.test(getComputedStyle(n).overflowY))return n;
+  }
+  return null;
+ }
  function page(before){const all=turns(),index=before?all.findIndex(n=>turnID(n)===before):all.length;if(index<0)throw Error('history_cursor_expired');const selected=all.slice(Math.max(0,index-24),index).filter(n=>!n.parentElement?.closest('[data-turn-key],[data-testid^="conversation-turn-"],article[data-scroll-anchor]')).slice(-12);return {turns:selected,hasMore:selected.length>0&&all.indexOf(selected[0])>0}}
  function messages(before){
+  const boundary=transcript(),excluded=n=>p.excluded(n,boundary);
   const out=[];
   for(const turn of page(before).turns){
-   const roles=[...turn.querySelectorAll('[data-message-author-role],[data-conversation-role]')].filter(n=>!p.excluded(n)&&!n.matches('h1,h2,h3,h4,h5,h6,.sr-only')&&['user','assistant'].includes(n.getAttribute('data-message-author-role')||n.getAttribute('data-conversation-role')));
+   const roles=[...turn.querySelectorAll('[data-message-author-role],[data-conversation-role]')].filter(n=>!excluded(n)&&!n.matches('h1,h2,h3,h4,h5,h6,.sr-only')&&['user','assistant'].includes(n.getAttribute('data-message-author-role')||n.getAttribute('data-conversation-role')));
    if(!roles.length&&turn.matches('[data-message-author-role],[data-conversation-role]'))roles.push(turn);
-   const candidates=[...roles,...[...turn.querySelectorAll('[class*="DilResponseRoot"]')].filter(n=>!p.excluded(n)&&!roles.some(r=>r.contains(n)))],hints=new Map();
+   const candidates=[...roles,...[...turn.querySelectorAll('[class*="DilResponseRoot"]')].filter(n=>!excluded(n)&&!roles.some(r=>r.contains(n)))],hints=new Map();
    // Verified official user markup (2026-10-12): semantic bubble classes,
    // no role attribute or message ID. Read the bubble, not its toolbar/group.
    for(const bubble of turn.querySelectorAll('.bg-user-message.text-user-message')){
-    if(!bubble.closest('[class~="group/user-message"]')||p.excluded(bubble)||roles.some(r=>r.contains(bubble))||bubble.closest('[data-message-author-role="assistant"],[data-conversation-role="assistant"]'))continue;
+    if(!bubble.closest('[class~="group/user-message"]')||excluded(bubble)||roles.some(r=>r.contains(bubble))||bubble.closest('[data-message-author-role="assistant"],[data-conversation-role="assistant"]'))continue;
     candidates.push(bubble);hints.set(bubble,'user');
    }
    const roleIndex={user:0,assistant:0};
    for(const heading of turn.querySelectorAll('h4[data-conversation-role="assistant"],.sr-only[data-conversation-role="assistant"]')){
     const body=heading.nextElementSibling;if(!body)continue;
     const roots=body.matches('[class*="MarkdownRoot"],.markdown')?[body]:[...body.querySelectorAll('[class*="DilResponseRoot"],[class*="MarkdownRoot"],.markdown')];
-    for(const n of roots)if(!p.excluded(n)&&!roles.some(r=>r.contains(n))&&!n.closest('[data-testid*="activity" i],[data-testid*="reasoning" i]')){candidates.push(n);hints.set(n,'assistant')}
+    for(const n of roots)if(!excluded(n)&&!roles.some(r=>r.contains(n))&&!n.closest('[data-testid*="activity" i],[data-testid*="reasoning" i]')){candidates.push(n);hints.set(n,'assistant')}
    }
    for(const heading of turn.querySelectorAll('h4[data-conversation-role="user"],.sr-only[data-conversation-role="user"]')){const body=heading.nextElementSibling;if(body&&!roles.some(r=>r.contains(body))&&!body.matches('button,form,input,textarea')&&!body.querySelector('[class*="DilResponseRoot"]')){candidates.push(body);hints.set(body,'user')}}
    for(const n of [...new Set(candidates)].filter((n,i,a)=>!a.some(r=>r!==n&&r.contains(n))).sort((a,b)=>a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING?-1:1)){
-    if(p.excluded(n))continue;
+    if(excluded(n))continue;
     const role=hints.get(n)||n.getAttribute('data-message-author-role')||n.getAttribute('data-conversation-role')||'assistant';
-    const body=role==='user'?n:[...n.querySelectorAll('[class*="DilResponseRoot"],[class*="MarkdownRoot"],.markdown,[data-markdown-text-style]')].find(r=>!p.excluded(r)&&p.cleanText(r))||n;
+    const body=role==='user'?n:[...n.querySelectorAll('[class*="DilResponseRoot"],[class*="MarkdownRoot"],.markdown,[data-markdown-text-style]')].find(r=>!excluded(r)&&p.cleanText(r))||n;
     const full=p.cleanText(body),value=full.slice(0,48000);if(!value)continue;
     const blocks=[];
     for(const e of [...body.querySelectorAll('h1,h2,h3,p,pre,table,li,blockquote,a')].filter(n=>!n.parentElement?.closest('pre,table,li,blockquote')&&(!n.matches('a')||!n.parentElement?.closest('p,h1,h2,h3'))).slice(0,120)){
-     if(p.excluded(e))continue;const value=p.cleanText(e).slice(0,12000);if(value)blocks.push({kind:e.matches('pre')?'code':e.matches('table')?'table':e.matches('h1,h2,h3')?'heading':e.matches('li')?'list':'text',text:value});
+     if(excluded(e))continue;const value=p.cleanText(e).slice(0,12000);if(value)blocks.push({kind:e.matches('pre')?'code':e.matches('table')?'table':e.matches('h1,h2,h3')?'heading':e.matches('li')?'list':'text',text:value});
     }
     if(blocks.map(b=>b.text).join('').replace(/\s+/g,'')!==full.replace(/\s+/g,''))blocks.length=0;
-    const links=[...body.querySelectorAll('a[href]')].filter(n=>!p.excluded(n)).slice(0,50).flatMap(a=>{try{const u=new URL(a.getAttribute('href'),location.href);return ['https:','http:'].includes(u.protocol)?[{title:text(a).slice(0,200),url:u.href}]:[]}catch{return []}});
+    const links=[...body.querySelectorAll('a[href]')].filter(n=>!excluded(n)).slice(0,50).flatMap(a=>{try{const u=new URL(a.getAttribute('href'),location.href);return ['https:','http:'].includes(u.protocol)?[{title:text(a).slice(0,200),url:u.href}]:[]}catch{return []}});
     // Stable across DOM replacement: an old identical bubble must not turn
     // into a "newly sent" message merely because React replaced its element.
     const stableID=turnID(turn)+':'+role+':'+(roleIndex[role]||0);roleIndex[role]=(roleIndex[role]||0)+1;
@@ -118,12 +129,14 @@
   if(searchSnapshot&&!searchSurface())searchSnapshot=null;
   const currentDoc=documentId,value=draft(),all=routePending||!conversation()?[]:messages();
   const pageState=routePending?'loading':state();
-  const status=conversation()&&all.length===0&&pageState==='idle'?'loading':pageState;
+  const searching=Boolean(searchSurface());
+  const status=searching&&all.length?'searching':conversation()&&all.length===0&&pageState==='idle'?'loading':pageState;
   const interactions=routePending?[]:actions.collect(turns().at(-1));
   const projectId=requestedProject&&project()?.startsWith(requestedProject)?requestedProject:project();
   const snap={schema:1,sharedTab:true,documentId:currentDoc,conversationId:conversation(),route:location.pathname,projectId,temporary:!conversation(),title:conversation()?document.title.replace(/\s*[-–]\s*ChatGPT$/,'').slice(0,200):'新聊天',messages:all,status,
-   draft:'',draftHash:await sha(value),pcDraftOccupied:Boolean(value.trim()),composing,canSend:Boolean(editor())&&!composing&&!value.trim()&&!['running','waiting','loading'].includes(status),
+   draft:'',draftHash:await sha(value),pcDraftOccupied:Boolean(value.trim()),composing,searchActive:searching,canSend:!searching&&Boolean(editor())&&!composing&&!value.trim()&&!['running','waiting','loading'].includes(status),
    responsePhase:interactions.length?'waiting':status==='running'?(all.some(m=>m.role==='assistant'&&m.turnId===turnID(turns().at(-1)))?'responding':'thinking'):status,interactions,
+   historyLayout:{loadedTurns:turns().length,scrollTop:Math.round(historyViewport()?.scrollTop||0),scrollHeight:historyViewport()?.scrollHeight||0,viewportHeight:historyViewport()?.clientHeight||0,reverse:historyViewport()?getComputedStyle(historyViewport()).flexDirection==='column-reverse':false},
    historyCursor:all[0]?.turnId||null,hasOlder:!routePending&&Boolean(conversation())&&page().hasMore,historyPartial:true,unsupportedTools:Boolean(transcript()?.querySelector('iframe'))};
   if(snap.messages.length||snap.temporary)lastContentSnapshot=snap;
   return snap;
@@ -150,7 +163,7 @@
  async function composeSend(b){
   let clicked=false,wroteEditor=null,editRevision=pcEditRevision;
   try{
-   routeCheck(b);if(composing)throw Error('pc_composing');if(b.projectId&&!project()?.startsWith(b.projectId))throw Error('project_context_changed');if(['running','waiting','loading'].includes(state())||routePending)throw Error('pc_busy_or_approval');
+   routeCheck(b);if(searchSurface())throw Error('close_search_before_send');if(composing)throw Error('pc_composing');if(b.projectId&&!project()?.startsWith(b.projectId))throw Error('project_context_changed');if(['running','waiting','loading'].includes(state())||routePending)throw Error('pc_busy_or_approval');
    const before=draft();if(before.trim())throw Error('pc_draft_conflict');if(!editor())throw Error('editor_unavailable');
    if(await sha(before)!==b.baseDraftHash||draft()!==before)throw Error('draft_conflict');routeCheck(b);
    if(typeof b.text!=='string'||!b.text.trim()||b.text.length>16000)throw Error('invalid_text');
@@ -254,7 +267,9 @@
   routeCheck(b);if(composing)throw Error('pc_composing');if(draft().trim()||searching&&searchSnapshot?.pcDraftOccupied)throw Error('pc_draft_blocks_navigation');
   const old=route,oldTurn=turnID(turns().at(-1));let control;
   if(b.action==='open'){
-   const entry=known.get(b.targetConversationId);if(!entry)throw Error('conversation_not_observed');
+   let entry=known.get(b.targetConversationId);
+   if(!entry&&typeof b.observedPath==='string'&&/^\/(?:g\/g-p-[A-Za-z0-9_-]+\/)?c\/[A-Za-z0-9_-]{12,80}\/?$/.test(b.observedPath)&&b.observedPath.match(/(?:^|\/)c\/([A-Za-z0-9_-]+)/)?.[1]===b.targetConversationId)entry={id:b.targetConversationId,path:b.observedPath};
+   if(!entry)throw Error('conversation_not_observed');
    if(entry.id===conversation())return {snapshot:await snapshot()};
    control=[...document.querySelectorAll('a[href]')].find(a=>{try{return p.visible(a)&&new URL(a.href,location.href).pathname===entry.path}catch{return false}});
    if(control)control.click();else {if(searching)await dismissSearch();if(draft().trim())throw Error('pc_draft_blocks_navigation');location.assign(entry.path);} // Only previously observed official link, never caller URL.
@@ -300,5 +315,5 @@
  const compEnd=()=>{composing=false;schedule()};
  function destroy(){stop();chrome.runtime.onMessage.removeListener(onMessage);document.removeEventListener('input',input,true);document.removeEventListener('compositionstart',compStart,true);document.removeEventListener('compositionend',compEnd,true)}
  chrome.runtime.onMessage.addListener(onMessage);document.addEventListener('input',input,true);document.addEventListener('compositionstart',compStart,true);document.addEventListener('compositionend',compEnd,true);
- globalThis.__CGPT_SHARED_PAGE__={version:'0.2.3-r2.3',snapshot,destroy};
+ globalThis.__CGPT_SHARED_PAGE__={version:'0.2.5-r2.1',snapshot,destroy};
 })();

@@ -1,6 +1,6 @@
 {
   "name": "chatgpt-pc-bridge",
-  "version": "0.2.3",
+  "version": "0.2.5",
   "private": true,
   "description": "Standalone ChatGPT Chrome bridge and local mobile companion service",
   "type": "module",
@@ -14,6 +14,7 @@
     "test:shared": "npm run build && python dist/bridge/scripts/test-shared-tab.py",
     "test:modern-user": "npm run build && python dist/bridge/scripts/test-modern-user-message.py",
     "test:search": "npm run build && python dist/bridge/scripts/test-search-boundaries.py",
+    "test:history": "npm run build && python dist/bridge/scripts/test-history-recovery.py",
     "test:coexistence": "npm run build && python dist/bridge/scripts/test-extension-coexistence.py",
     "test:resilience": "npm run build && python dist/bridge/scripts/test-pc-extension-resilience.py",
     "check": "npm run build && node scripts/check.mjs",

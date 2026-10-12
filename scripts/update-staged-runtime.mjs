@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import {ROOT} from './sources.mjs';
 const port=Number(process.argv[2]||13213);
 const status=await(await fetch(`http://127.0.0.1:${port}/local/status`,{signal:AbortSignal.timeout(3000)})).json();
@@ -23,3 +24,11 @@ for(const name of ['package.json','package-lock.json']){const data=await fs.read
 const version=JSON.parse(await fs.readFile(path.join(to,'package.json'),'utf8')).version;
 await fs.writeFile(path.join(to,'RUNTIME_BUILD.json'),JSON.stringify({version,files:hashes},null,2));
 console.log(JSON.stringify({runtimeUpdated:true,backup,files:Object.keys(hashes).length,version,orchestratorChanged:false,privateStateChanged:false}));
+// Optional office maintenance transport only; the built Bridge still has no
+// dependency on the Orchestrator's source, executor, queues or runtime service.
+// Complete the copy first. No save-time watcher can load half-written source.
+if(!process.argv.includes('--stage-only')){
+ const command=path.resolve(ROOT,'../igg-workflow/scripts/reload-browser-extension.mjs');
+ const result=spawnSync(process.execPath,[command,'pc-bridge','--port',String(port),...(process.argv.includes('--bootstrap')?['--bootstrap']:[])],{stdio:'inherit'});
+ if(result.status!==0)throw Error('runtime_staged_but_background_reload_not_confirmed_no_ui_fallback');
+}

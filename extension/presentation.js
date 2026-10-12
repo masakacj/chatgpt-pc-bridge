@@ -17,7 +17,15 @@
   }
   return walk(node).replace(/\n{3,}/g,'\n\n').trimEnd();
  }
- function excluded(node){return Boolean(node.closest(OMIT+','+PANELS))}
+ function excluded(node,boundary=null){
+  if(!boundary)return Boolean(node.closest(OMIT+','+PANELS));
+  // The official search modal aria-hides the app shell, not its individual
+  // messages. Ignore only ancestors outside the verified transcript boundary;
+  // still omit every hidden/tool/analysis node inside that transcript.
+  if(!boundary.contains(node))return true;
+  for(let n=node;n&&n!==boundary;n=n.parentElement)if(n.matches(OMIT+','+PANELS))return true;
+  return false;
+ }
  function createActions(documentId,getTurnKey,getConversation){
   let entries=new Map();const ids=new WeakMap(),versions=new WeakMap(),used=new Set();
   const idFor=b=>{if(!ids.has(b))ids.set(b,crypto.randomUUID());return ids.get(b)};
