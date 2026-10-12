@@ -1,49 +1,76 @@
-# PC Bridge / Native iOS — current handoff
+# PC Bridge / 原生 iOS — 当前开发交接
 
-Updated 2026-10-12, R0/R1 implementation. Read `docs/NEXT_DEVELOPMENT_PLAN_20261012.md` for the remaining R0–R6 plan. This file supersedes the old 0.1.0 planning notes. **Bridge development version 0.2.2; production 3211 and signed iOS release are not switched.**
+更新：2026-10-12。**R0 源码固化及独立仓库 CI 已验收；R1 用户消息提取与真实发送确认已验收；R2 核心官网流程已有真实通过记录，但完整范围尚未结束。正式3211及新版iOS未发布。** 后续路线见 `docs/NEXT_DEVELOPMENT_PLAN_20261012.md`。
 
-## Fixed scope
+## 范围不变
 
-The SwiftUI phone app mirrors structured content/actions from one user-bound PC ChatGPT tab. Phone navigation uses that same tab, PC navigation in it updates the phone, and selecting another browser tab does not change the binding. Phone drafts are per conversation and submit only on explicit Send; PC unsent text is not echoed to the phone.
+SwiftUI原生手机端，结构化镜像一个明确绑定的PC ChatGPT标签页。手机导航操作同页；PC页内导航手机跟随；激活其他Chrome标签不更换绑定。手机草稿按对话独立保存，明确点击发送才提交；PC未发送文字不回填手机。
 
-Keep the original Orchestrator executor/ID, 3210, workflow queue and PC state/recovery modules. The independent Bridge owns only mobile functionality and has its own extension ID. No executor adapter/replacement and no mandatory background reader tab.
+只剥离桥接。原Orchestrator executor、原ID/存储、3210、任务队列和PC状态增强保留。新Bridge有独立ID和服务；不迁移执行器、不做optional executor adapter、不强制后台专用标签。
 
-## Current development and runtime
+## R0：已验收
 
-- mcpoffice workspace `ws_53924e782d`: `D:\workspace\py\chatgpt-pc-bridge`.
-- Installed Bridge ID `heamldipoecpedbnoffiaadjkdagbmoc`, path `runtime/extension`, version 0.2.2.
-- Staged independent service: `127.0.0.1:13213`; private state `var/stage`. Final production 3211 is still owned by the old mobile service.
-- Source files, generated dist, installed runtime and private var are distinct. `scripts/update-staged-runtime.mjs` backs up and updates only the independent runtime at an idle boundary; it never modifies Orchestrator or pairing/journals.
-- Original executor was repeatedly verified online, one v43 executor and zero workflow runs. It was not reloaded, replaced or refactored for these changes.
+准确代码提交：**c9c6676ca878dd10f15ac4911fdb62929aad0683**，仓库 `masakacj/chatgpt-pc-bridge`，版本 **0.2.2**。
 
-## R1 fixes and real evidence
+准确CI：**38189275456**，Node22、Node24、browser三个job全部success。CI从独立仓库checkout构建，不存在旧Orchestrator目录依赖。浏览器job执行旧独立链路、兼容协议、共享标签页、新官网消息结构和共存回归，随后打包成功。
 
-1. The current official user bubble has `.bg-user-message.text-user-message` inside `group/user-message`, without a user role attribute or message ID. Added the narrowly observed selector; exclude hidden branches and toolbars. Stable per-turn/role IDs prevent a React remount of an identical old message from confirming a new Send.
-2. Official SPA navigation retains hidden old composers AND hidden old transcript containers. Both editor selection and transcript selection now target the visible surface, instead of taking the first DOM match. This also prevents old messages from appearing under a new conversation ID.
-3. ProseMirror paragraph boundaries are read as typed newlines. Previously `innerText` added visual blank lines and caused a false draft conflict on multiline text. Empty paragraphs are preserved; PC draft text is still not transmitted to the phone.
-4. Removed the attempted tab-activation workaround after identifying hidden elements as the real issue. No automatic tab/window focus change was added to ordinary Bridge operations.
-5. Search `hasMore` now derives from an actual enabled native more button or remaining scrollable content, not merely from the existence of results.
+已逐文件核对：导出的**56个文件**与该提交Git blob一致；已安装runtime的**19个文件**与同份源码一致，差异均为0。Windows部署脚本3份已包含。`var/`、密钥、journal、profile、runtime及临时验收清理页没有进入发布源码；临时清理页已从安装runtime移除。此后的handoff文档提交不改变上述受测代码SHA。
 
-**Real official-page checks completed in owned development chats:**
-- Read the old recorded test conversation: one matching user message and one assistant reply are now extracted. Its old `sent_unconfirmed` receipt was left intact; the message was never replayed.
-- New multiline message in the recorded existing chat: `sent_confirmed`, one matching user message and one corresponding reply, same bound tab.
-- New ordinary chat (`ordinary-visible-root` case): `sent_confirmed`, real conversation ID, one matching user message and one reply, same bound tab.
-- New chat under the observed development project (`project-visible-root` case): `sent_confirmed`, correct project ID, one matching user message and one reply, same bound tab.
+## R1：真实网页发送链路已验收
 
-Earlier attempts in this iteration failed BEFORE Send while adapting the hidden composer/newline behavior; only explicitly verified `not_sent` cases were retried with new command IDs. One pre-fix ordinary-chat command was sent but returned unconfirmed while the hidden old transcript was selected; its command was not replayed. Later acceptance used separately labeled new cases. Do not clear these journal entries or relabel old unknown results without their own evidence.
+本轮修复 `extension/shared-page.js`：
 
-The test runner's initial short reply observation can end before the model finishes; subsequent checks used receipt/snapshot GETs only. The three accepted cases above were finally verified with both roles present. Private detailed evidence is `var/stage/r1-r2-evidence.json`; never publish its complete conversation IDs or content. The fixed-string local test-draft cleanup pages were one-off development helpers and are excluded from source exports and removed from installed runtime updates.
+1. 官网用户气泡使用 `.bg-user-message.text-user-message`／`group/user-message`，但没有user角色属性或message ID。补足准确提取规则，排除工具栏和隐藏分支。
+2. 同一SPA内保留隐藏旧输入框；只选择可见且可编辑的输入框，不再拿第一个DOM匹配。
+3. ProseMirror多段落的显示空行不等于实际输入换行；按段落边界读取，保留用户的空段落，避免中文多行文本误报draft_conflict。
+4. 同一SPA也保留隐藏旧正文；只读取当前可见transcript，避免新会话ID下出现旧会话消息。
+5. 使用稳定的轮次／角色消息标识；旧气泡被React重建、内容恰好相同时，不会被误判为新Send。
 
-## Tests and publication
+曾尝试的“激活标签页修复输入焦点”已撤销，真正问题是隐藏DOM。普通桥接操作没有新增自动抢占窗口／标签焦点的逻辑。
 
-Recorded local checks for this implementation: Node 49/49; original shared-tab MV3 13/13; observed roleless-user/hidden-composer/hidden-transcript/paragraph fixture 16/16; original-state coexistence 4/4. Re-run the final source inventory before recording a new source CI result.
+**真实官网验收，而非只依赖模拟页面：**
 
-Source export now includes Windows PowerShell deployment scripts and excludes var/runtime/private data. The public repository already contained the prior full extraction (`4403027299a8499989cc87b3cbd4b189ec51d168`), but that old CI does not certify this implementation. **R0 latest source publication/clean-checkout CI is being finalized; append the exact resulting commit and run below after verification.** Canonical remote files include all imported modules, so a clean clone does not need an Orchestrator directory.
+| 场景 | 结果 |
+|---|---|
+| 只读恢复此前测试会话 | 读出1条对应用户消息及1条助手回复；旧sent_unconfirmed记录保留，没有重发 |
+| 现有聊天发送中文多行测试消息 | sent_confirmed；1条新用户消息＋1条对应回复；同一绑定tab |
+| 普通新建首发（visible-root独立用例） | sent_confirmed；产生真实conversationId；用户消息和回复各1条；同一tab |
+| 开发项目内新建首发（visible-root独立用例） | sent_confirmed；projectId正确；用户消息和回复各1条；同一tab |
 
-## R2 and later still pending
+测试初期出现的隐藏输入框／换行失败均在点击前被判定为not_sent；只对这种已证明未发送的失败发起新命令，不重放原commandId。另有一条修复隐藏正文前的普通新聊天测试返回sent_unconfirmed；保留该记录，后续使用有明确新标签的独立用例，没有重发它。旧未知状态不能直接改成成功。
 
-The real official search opens and returns results, but the first broad query did not establish retrieval of a history item outside the loaded sidebar. Full-history coverage, archived/older project results, native pagination/end-of-results and additional real same-tab navigation acceptance remain open. Do not claim all history is supported from the fixture or the small live result set.
+实际回复有时晚于测试脚本的首轮短观察窗口；最终验收使用GET读取回执／快照，确认上述三个成功场景的用户消息和回复均存在。原始验收记录在私有 `var/stage/r1-r2-evidence.json`，不上传正文、配对信息或完整私人日志。
 
-The native iOS candidate remains the previously tested branch `feature/shared-tab-native-070-20261011`, actual tested SHA `b33b1d99f9c240261ae2983ecefa583c64e2363a`, run `38153702824`: 8/8 Simulator UI, 24 draft assertions and Release device-target compile. No iOS code was changed during this PC-only repair; those are prior results, not a new run or actual iPhone acceptance. Last verified install-center baseline was 0.6.0 Build221; recheck before publishing.
+## R2：已推进的真实官网验证
 
-Next: finish source/CI traceability; continue R2 real history/search/navigation acceptance; prepare a signed candidate without promoting latest; retire ONLY old mobile handlers/3211 and cut over the independent service with old pairing/journals preserved; test startup/crash recovery; actual iPhone acceptance; then formal promotion. Do not claim all phases complete.
+真实官网搜索“Wake on LAN”返回4个不在当前已加载侧栏中的历史结果；选择匹配的旧对话后，在**同一个绑定标签页**读取到6条历史消息，状态completed，没有新建浏览器标签或发送消息。检查后成功返回原开发测试会话。
+
+搜索“是否还有更多”已改成检查实际可用的更多按钮或未滚到底的列表，不再只要有结果就一直返回true。有限结果集回归通过；上述真实搜索的hasMore=false。
+
+这证明旧历史检索／打开路径工作，但**不等于全账号、归档、所有项目及所有分页边界均已验收**。仍需继续更多分页、无结果、项目内旧聊天、归档可见范围、长历史连续性、真实PC主动导航和复杂交互兼容性验收。
+
+## 当前测试证据
+
+| 测试 | 最新结果 |
+|---|---|
+| Node协议／状态／独立服务 | 49/49通过；CI分别在Node22、24通过 |
+| 共享标签页原模拟网页 | 13/13通过；本轮CI通过 |
+| 新官网用户气泡＋隐藏旧DOM＋富文本段落回归 | 16/16通过；本轮本地及CI通过 |
+| 原状态模块与新桥接共存专项 | 4/4通过；本轮本地及CI通过 |
+| JavaScript语法／结构 | 30个文件通过 |
+
+共存专项不是全部编排工作流重跑。原编排器现场健康检查仍为1个v43 executor、runs0，未重载或改造该执行器。
+
+## 实际运行与iOS发布
+
+独立项目：mcpoffice `D:\workspace\py\chatgpt-pc-bridge`，workspace `ws_53924e782d`。安装落地点 `runtime/extension`；扩展 **0.2.2**，ID `heamldipoecpedbnoffiaadjkdagbmoc`。
+
+本次最终检查：独立服务 `127.0.0.1:13213` 为200，pid45572、extensionConnected=true、sessions0、pending0、journalCount9。原Orchestrator3210为200，1个 `pc-extension-v43-mobile-controls`，runs0。**正式3211仍未切换**，旧手机入口没有用测试配对替换。
+
+安装中心本次实时GET仍为 **iOS0.6.0 Build221**。本轮没有改iOS代码或发布IPA。既有原生候选分支 `feature/shared-tab-native-070-20261011`，受测SHA `b33b1d99f9c240261ae2983ecefa583c64e2363a`、run38153702824，此前8/8模拟器、24项草稿断言、设备目标编译通过；不冒充本轮重测或真机验收。
+
+## 下一执行点
+
+继续R2剩余真实官网验收；随后R3生成可安装但不覆盖正式latest的签名候选；R4仅停用旧mobile入口／转发／3211并迁入独立服务，保留正式配对和所有回执，验证开机／异常恢复与回退；R5真实iPhone验收；R6正式推广。
+
+不要再从“用户消息未提取”“只有0.1.0源码”“需要替换编排器”重新做起。后续修改沿当前代码提交，按改动范围增量测试。全计划仍未完成，不得以本轮PC验收替代正式切换、真机或发布。
