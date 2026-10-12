@@ -1,6 +1,9 @@
 node_modules/
 dist/
 data/
+var/
+runtime/
+runtime.stage/
 .env
 .env.*
 *.log

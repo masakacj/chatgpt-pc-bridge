@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {once} from 'node:events';
+import {request as httpRequest} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {WebSocket} from 'ws';
 import {createStandaloneBridge,PRODUCTION_EXTENSION} from '../service/standalone.js';
@@ -94,6 +95,17 @@ test('worker disconnect invalidates the old document instead of sending to a rep
  const s=(await f.req('/v1/sessions',{tabId:3})).body;
  ws.close();await once(ws,'close');await new Promise(r=>setTimeout(r,10));
  assert.equal((await f.req('/v1/sessions/'+s.sessionId)).body.routeChanged,true);
+});
+test('pairing reveal is explicit, same-origin and local-host only',async t=>{
+ const f=await fixture(t);
+ const page=await fetch(f.base+'/local/pair');assert.equal(page.status,200);assert.equal(page.headers.get('x-frame-options'),'DENY');assert(!(await page.text()).includes(f.phone));
+ const rejected=await fetch(f.base+'/local/setup',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://example.invalid'},body:JSON.stringify({reveal:true})});assert.equal(rejected.status,403);
+ const hidden=await fetch(f.base+'/local/setup',{method:'POST',headers:{'Content-Type':'application/json',Origin:f.base},body:'{}'});assert.equal(hidden.status,400);
+ const accepted=await fetch(f.base+'/local/setup',{method:'POST',headers:{'Content-Type':'application/json',Origin:f.base},body:JSON.stringify({reveal:true})});assert.equal(accepted.status,200);assert.equal((await accepted.json()).token,f.phone);
+ const remoteHostStatus=await new Promise((resolve,reject)=>{const u=new URL(f.base);const r=httpRequest({hostname:u.hostname,port:u.port,path:'/local/pair',headers:{Host:'chatgpt-pc.example.invalid'}},response=>{response.resume();resolve(response.statusCode)});r.on('error',reject);r.end();});assert.equal(remoteHostStatus,403);
+});
+test('local operational health contains no pairing or extension key',async t=>{
+ const f=await fixture(t);const r=await fetch(f.base+'/local/status');assert.equal(r.status,200);const s=await r.json();assert.equal(s.extensionConnected,false);assert.equal(s.pid,process.pid);assert(!JSON.stringify(s).includes(f.phone));assert(!JSON.stringify(s).includes(f.ipc));
 });
 test('malformed private journal is not silently reset on extraction/startup',async()=>{
  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'bridge-invalid-'));

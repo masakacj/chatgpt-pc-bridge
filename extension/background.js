@@ -11,6 +11,6 @@ const shared=startSharedBridge({send});
 connection=startBridgeConnection({handle:message=>shared.handle(message)||legacy.handle(message),disconnected:()=>{shared.disconnected();legacy.disconnected();}});
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(sender.id!==chrome.runtime.id||sender.url!==chrome.runtime.getURL('options.html'))return;
-  if(message?.type==='bridge_audit')reply({version:chrome.runtime.getManifest().version,...connection.audit(),mobile:shared.audit()});
+  if(message?.type==='bridge_audit')reply({version:chrome.runtime.getManifest().version,...connection.audit(),mobile:shared.audit(),legacy:legacy.audit()});
 });
 chrome.action.onClicked.addListener(()=>chrome.runtime.openOptionsPage());

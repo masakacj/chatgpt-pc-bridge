@@ -14,7 +14,7 @@ async function readJSON(file) {
   try { return JSON.parse(await fs.readFile(file,'utf8')); }
   catch(e) { if(e.code==='ENOENT') return null; throw new Error('invalid_private_state',{cause:e}); }
 }
-export async function createMobileBridge({directory,send,isBusy=()=>false,timeoutMs=15000,now=()=>Date.now()}) {
+export async function createMobileBridge({directory,send,isBusy=()=>false,timeoutMs=15000,now=()=>Date.now(),configureLocalApp}) {
   await fs.mkdir(directory,{recursive:true});
   const configPath=path.join(directory,'pairing.json'),journalPath=path.join(directory,'commands.json');
   let config=await readJSON(configPath);
@@ -28,6 +28,11 @@ export async function createMobileBridge({directory,send,isBusy=()=>false,timeou
   if(typeof journal!=='object'||Array.isArray(journal))throw Error('invalid_command_journal');
   for(const value of Object.values(journal)){
     if(value.state==='reserved')value.state='unknown';
+    // v0.2.0 threw page_loading only before forwarding compose to the page.
+    // Retain the ID/hash but report the proven zero-click result correctly.
+    if(value.action==='compose'&&value.state==='unknown'&&value.result?.error==='page_loading'){
+      value.state='failed';value.result={...value.result,status:'not_sent',proof:'pre_dispatch_binding_loading'};
+    }
     if(value.action==='send'&&value.state==='unknown'&&value.result?.error==='send_unavailable'){
       value.state='failed';value.result={...value.result,status:'not_sent',proof:'pre_click_button_missing'};
     }
@@ -59,7 +64,7 @@ export async function createMobileBridge({directory,send,isBusy=()=>false,timeou
     }
     if(message?.type==='mobile_tab_changed') {
       const s=sessions.get(message.sessionId);if(!s||!s.followTab||message.tabId!==s.tabId)return true;
-      s.routeChanged=true;s.tabClosed=message.closed===true;s.snapshot=null;s.hash='';s.revision++;notify(s);return true;
+      s.routeChanged=true;s.tabClosed=message.closed===true;s.bindingRevision=Math.max(s.bindingRevision||0,message.bindingRevision||0);s.snapshot=null;s.hash='';s.revision++;notify(s);return true;
     }
     if(message?.type==='mobile_snapshot') {
       const s=sessions.get(message.sessionId);
@@ -68,7 +73,7 @@ export async function createMobileBridge({directory,send,isBusy=()=>false,timeou
       if(!snap||snap.schema!==1||typeof snap.conversationId!=='string'||!Array.isArray(snap.messages)||snap.messages.length>24)return true;
       if(s.conversationId&&s.conversationId!==snap.conversationId&&!s.followTab){s.routeChanged=true;notify(s);return true}
       if(Buffer.byteLength(JSON.stringify(snap))>600000)return true;
-      if(s.followTab){if(Number.isFinite(snap.bindingRevision)&&snap.bindingRevision<(s.bindingRevision||0))return true;s.bindingRevision=snap.bindingRevision||0;s.routeChanged=false;s.tabClosed=false;}
+      if(s.followTab){if(Number.isFinite(snap.bindingRevision)&&snap.bindingRevision<(s.bindingRevision||0))return true;if(Number.isFinite(snap.bindingRevision))s.bindingRevision=snap.bindingRevision;snap.draft='';s.routeChanged=false;s.tabClosed=false;}
       s.conversationId=snap.conversationId;
       const hash=digest(JSON.stringify(snap));
       if(hash!==s.hash){s.hash=hash;s.snapshot=snap;s.revision++;s.capturedAt=now();notify(s)}
@@ -79,6 +84,7 @@ export async function createMobileBridge({directory,send,isBusy=()=>false,timeou
   function view(s){return {ok:true,sessionId:s.id,tabId:s.tabId,followTab:!!s.followTab,tabClosed:!!s.tabClosed,revision:s.revision,capturedAt:s.capturedAt||0,routeChanged:!!s.routeChanged,snapshot:s.snapshot||null}}
   function notify(s){for(const done of s.waiters)done();s.waiters.clear()}
   const app=express();app.disable('x-powered-by');
+  if(configureLocalApp)configureLocalApp(app,()=>config.token);
   app.use((req,res,next)=>{
     res.set('Cache-Control','no-store');res.set('X-Content-Type-Options','nosniff');
     if(req.headers.origin)return res.status(403).json({error:'browser_origin_not_allowed'});

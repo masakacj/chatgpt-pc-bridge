@@ -1,6 +1,6 @@
 """Real MV3 shared-tab workflow with deterministic official-UI fixtures only."""
 from pathlib import Path
-import json,os,subprocess,tempfile,time,urllib.request,urllib.error,uuid
+import json,os,subprocess,tempfile,time,urllib.request,urllib.error,uuid,hashlib
 from playwright.sync_api import sync_playwright
 ROOT=Path(__file__).resolve().parent.parent
 A='11111111-1111-4111-8111-111111111111';B='22222222-2222-4222-8222-222222222222';C='33333333-3333-4333-8333-333333333333';P='g-p-aaaaaaaaaaaaaaaa'
@@ -11,7 +11,7 @@ HTML='''<!doctype html><html><head><meta charset="utf-8"><style>body{font:16px s
 window.clicks=0;window.approvals=0;window.created=0;
 function show(path){history.pushState({},'',path);document.querySelector('[role=dialog]')?.remove();document.querySelector('textarea').value='';document.title=path.includes('/c/')?'Chat '+path.split('/').at(-1):'New chat';const id=path.split('/').at(-1);document.querySelector('.transcriptContent').innerHTML=path.includes('/c/')?'<article data-turn-key="'+id+'-old" data-talvt-turn-state="complete"><div data-message-author-role="user" data-message-id="u-'+id+'">Question '+id+'</div><h4 class="sr-only" data-conversation-role="assistant">ChatGPT said:</h4><div><div class="MarkdownRoot-native"><p>Answer '+id+'</p></div></div><section data-testid="reasoning"><div class="DilResponseRoot">HIDDEN_THOUGHT</div></section></article>':'';}
 function searchOpen(){if(document.querySelector('[role=dialog]'))return;const d=document.createElement('section');d.setAttribute('role','dialog');d.innerHTML='<input role="combobox" placeholder="Search chats"><div class="results"></div>';d.querySelector('input').oninput=()=>{d.querySelector('.results').innerHTML='<a href="/c/22222222-2222-4222-8222-222222222222">Older chat outside sidebar</a><a href="/c/33333333-3333-4333-8333-333333333333">Archived search fixture</a>';for(const a of d.querySelectorAll('a'))a.onclick=e=>{e.preventDefault();show(a.pathname);};};document.body.appendChild(d);}
-function sendMessage(){const e=document.querySelector('textarea'),value=e.value;if(!value)return;window.clicks++;if(!location.pathname.includes('/c/')){window.created++;const id='dddddddd-dddd-4ddd-8ddd-'+String(window.created).padStart(12,'0');history.pushState({},'',(location.pathname==='/'?'':location.pathname)+'/c/'+id);}const t=document.createElement('article');t.dataset.turnKey='sent-'+window.clicks;t.dataset.talvtTurnState='in_progress';const u=document.createElement('div');u.dataset.messageAuthorRole='user';u.dataset.messageId='sent-user-'+window.clicks;u.textContent=value;t.appendChild(u);const a=document.createElement('div');a.dataset.messageAuthorRole='assistant';a.dataset.messageId='sent-answer-'+window.clicks;a.innerHTML='<div class="DilResponseRoot"><p>Generating</p></div>';t.appendChild(a);document.querySelector('.transcriptContent').appendChild(t);e.value='';e.dispatchEvent(new Event('input',{bubbles:true}));setTimeout(()=>{a.querySelector('p').textContent='Reply: '+value;t.dataset.talvtTurnState='complete';},350);}
+function sendMessage(){const e=document.querySelector('textarea'),value=e.value;if(!value)return;window.clicks++;if(!location.pathname.includes('/c/')){window.created++;const id='dddddddd-dddd-4ddd-8ddd-'+String(window.created).padStart(12,'0');const assigned=(location.pathname==='/'?'':location.pathname)+'/c/'+id;setTimeout(()=>history.pushState({},'',assigned),350);}const t=document.createElement('article');t.dataset.turnKey='sent-'+window.clicks;t.dataset.talvtTurnState='in_progress';const u=document.createElement('div');u.dataset.messageAuthorRole='user';u.dataset.messageId='sent-user-'+window.clicks;u.textContent=value;t.appendChild(u);const a=document.createElement('div');a.dataset.messageAuthorRole='assistant';a.dataset.messageId='sent-answer-'+window.clicks;a.innerHTML='<div class="DilResponseRoot"><p>Generating</p></div>';t.appendChild(a);document.querySelector('.transcriptContent').appendChild(t);e.value='';e.dispatchEvent(new Event('input',{bubbles:true}));setTimeout(()=>{a.querySelector('p').textContent='Reply: '+value;t.dataset.talvtTurnState='complete';},350);}
 show(location.pathname);
 </script></body></html>'''
 
@@ -57,15 +57,46 @@ def run():
     def compose(value,s=None,key=None):
      s=s or fresh();b={'commandId':key or str(uuid.uuid4()),'action':'compose','documentId':s['documentId'],'baseDraftHash':s['draftHash'],'text':value,'projectId':s.get('projectId')};return req(prefix+'/commands',b),b
     results.append('bind a single existing tab; snapshot excludes PC draft text and reasoning')
+    if page.evaluate('Boolean(window.modernUserFixture)'):
+     user=next(m for m in snap['messages'] if m['role']=='user')
+     assert user['text']=='Question '+A and 'Copy user message' not in user['text']
+     page.evaluate("""()=>{const first=document.querySelector('.bg-user-message');first.replaceWith(first.cloneNode(true));const hidden=document.createElement('div');hidden.hidden=true;hidden.innerHTML='<div class="group/user-message"><div class="bg-user-message text-user-message">HIDDEN_USER_BRANCH</div></div>';document.querySelector('article').append(hidden);} """)
+     code,repainted=req(prefix+'?refresh=1');assert code==200
+     assert [m['id'] for m in repainted['snapshot']['messages'] if m['role']=='user']==[user['id']]
+     assert 'HIDDEN_USER_BRANCH' not in json.dumps(repainted['snapshot'])
+     results.append('observed roleless bubble excludes toolbar/hidden branches and keeps identity after React-style replacement')
+     page.evaluate("""()=>{window.realSend=sendMessage;window.repaintOnlyClicks=0;sendMessage=()=>{window.repaintOnlyClicks++;const bubble=document.querySelector('.bg-user-message');bubble.replaceWith(bubble.cloneNode(true));document.querySelector('textarea').value='';};}""")
+     (code,unconfirmed),same=compose(user['text'],repainted['snapshot'])
+     assert code==200 and unconfirmed['result']['status']=='sent_unconfirmed',(code,unconfirmed)
+     req(prefix+'/commands',same);assert page.evaluate('repaintOnlyClicks')==1
+     page.evaluate('()=>{sendMessage=window.realSend;}')
+     results.append('old identical user text remount is not mistaken for a newly accepted Send and is never replayed')
+     page.evaluate("""()=>{window.savedTextArea=document.querySelector('main textarea');const rich=document.createElement('div');rich.id='prompt-textarea';rich.contentEditable='true';rich.className='ProseMirror';rich.innerHTML='<p>第一行</p><p>第二行</p><p><br class="ProseMirror-trailingBreak"></p><p>第四行</p>';window.savedTextArea.replaceWith(rich);}""")
+     code,rich=req(prefix+'?refresh=1');assert code==200
+     assert rich['snapshot']['draftHash']==hashlib.sha256('第一行\n第二行\n\n第四行'.encode()).hexdigest()
+     assert rich['snapshot']['draft']=='' and rich['snapshot']['pcDraftOccupied']
+     page.evaluate("()=>document.querySelector('main .ProseMirror').replaceWith(window.savedTextArea)")
+     results.append('visible ProseMirror paragraph boundaries preserve typed newlines without including the hidden old composer')
     page.fill('textarea','PC private unsent text');page.wait_for_timeout(300);s=fresh();assert s['draft']=='' and s['pcDraftOccupied']
     (code,rejected),_=compose('do not overwrite',s);assert code==200 and rejected['result']['status']=='not_sent' and page.input_value('textarea')=='PC private unsent text'
     page.fill('textarea','');page.wait_for_timeout(300);s=fresh();assert not s['pcDraftOccupied']
+    mismatch={'commandId':str(uuid.uuid4()),'action':'compose','documentId':s['documentId'],'baseDraftHash':s['draftHash'],'text':'wrong project must not send','projectId':P}
+    code,rejected=req(prefix+'/commands',mismatch);assert code==200 and rejected['result']['status']=='not_sent' and rejected['result']['error']=='project_context_changed'
+    assert page.input_value('textarea')=='' and page.evaluate('clicks')==0
+    results.append('project mismatch is rejected before any editor write or Send click')
+    page.locator('button[aria-label="发送提示"]').evaluate('(b)=>b.disabled=true')
+    (code,failed),_=compose('button unavailable',fresh());assert code==200 and failed['result']['status']=='not_sent',(code,failed)
+    page.wait_for_timeout(100);assert page.input_value('textarea')=='' and page.evaluate('clicks')==0
+    page.locator('button[aria-label="发送提示"]').evaluate('(b)=>b.disabled=false');page.wait_for_timeout(300)
+    results.append('proven pre-click failure restores only the unchanged bridge insertion, permitting a deliberate retry')
+    s=fresh()
     (code,sent),body=compose('手机只点一次发送',s);assert code==200 and sent['result']['status']=='sent_confirmed',(code,sent)
     code,dup=req(prefix+'/commands',body);assert code==200 and page.evaluate('clicks')==1
     page.wait_for_timeout(600);assert '手机只点一次发送' in fresh()['messages'][-1]['text']
     results.append('single compose POST fills and sends once; PC draft conflict stays on PC; duplicate command does not replay')
     original=fresh();code,library=action('catalog');assert code==200 and B not in [x['id'] for x in library['chats']]
     code,search=action('search',query='Older chat');assert code==200 and B in [x['id'] for x in search['chats']],(code,search)
+    assert search['hasMore'] is False,'A fully visible finite result set must not offer endless Load more'
     results.append('official search finds a conversation absent from the loaded sidebar')
     code,opened=action('open',targetConversationId=B);assert code==200,(code,opened)
     s=fresh(B);assert page.url.endswith(B),('bound page',page.url,s['route']);assert len(req('/v1/tabs?shared=1')[1]['tabs'])==1
@@ -92,9 +123,11 @@ def run():
     req(prefix+'/commands',b);assert page.evaluate('approvals')==1
     results.append('explicit interaction card maps to one original button click')
     count=page.evaluate('clicks');assert count==3
+    prior=fresh();page.reload();reloaded=fresh(prior['conversationId']);assert reloaded['documentId']!=prior['documentId'] and page.evaluate('clicks')==0
+    results.append('bound-page reload reattaches the same conversation without replaying prior commands')
     page.close();time.sleep(.3);code,closed=req(prefix+'?after=-1');assert code==200 and closed['tabClosed'] and closed['snapshot'] is None,(code,closed)
     results.append('closing bound tab asks for re-selection; no automatic fallback to another tab')
-    print(json.dumps({'pass':True,'cases':results,'count':len(results),'fixtureSendClicks':count,'realUserMessagesSent':0},ensure_ascii=False))
+    print(json.dumps({'pass':True,'cases':results,'count':len(results),'fixtureSendClicks':count,'realUserMessagesSent':0,'modernUserMarkup':page.is_closed() and 'modernUserFixture' in HTML},ensure_ascii=False))
    finally:
     if service and service.poll() is None:service.terminate();service.wait(timeout=10)
     ctx.close()

@@ -1,67 +1,49 @@
-# PC Bridge / 原生 iOS — 当前开发交接
+# PC Bridge / Native iOS — current handoff
 
-## 后续执行计划（2026-10-12）
+Updated 2026-10-12, R0/R1 implementation. Read `docs/NEXT_DEVELOPMENT_PLAN_20261012.md` for the remaining R0–R6 plan. This file supersedes the old 0.1.0 planning notes. **Bridge development version 0.2.2; production 3211 and signed iOS release are not switched.**
 
-按 [NEXT_DEVELOPMENT_PLAN_20261012.md](NEXT_DEVELOPMENT_PLAN_20261012.md) 的 R0–R6 接续：同步当前源码 → 修复官网用户消息/发送确认 → 真实官网主流程 → 原生候选版 → 独立正式3211切换 → 真机验收 → 正式发布。源码同步与客户端收尾可并行；先有可安装签名候选包，再做真机验收，候选阶段不覆盖正式 latest。保留原编排器，不引入 executor adapter 或专用标签页要求。本文下方保留已核实的实际进度，新增计划不代表任务已完成。
+## Fixed scope
 
-更新：2026-10-12。**主要功能已实现；iOS模拟器验收及设备目标编译通过；真实PC网页联调未全部通过，尚未正式切换或发布新版IPA。** 本文替代此前0.1.0和“仅规划”的旧进度。完整本地交接同路径保存在mcpoffice独立项目。
+The SwiftUI phone app mirrors structured content/actions from one user-bound PC ChatGPT tab. Phone navigation uses that same tab, PC navigation in it updates the phone, and selecting another browser tab does not change the binding. Phone drafts are per conversation and submit only on explicit Send; PC unsent text is not echoed to the phone.
 
-## 产品约定
+Keep the original Orchestrator executor/ID, 3210, workflow queue and PC state/recovery modules. The independent Bridge owns only mobile functionality and has its own extension ID. No executor adapter/replacement and no mandatory background reader tab.
 
-SwiftUI原生手机界面，结构化镜像PC Chrome的ChatGPT网页。手机和PC共用一个明确绑定的标签页：手机切换／新建在该页执行，PC页内导航时手机跟随；激活其他标签不更换绑定。手机按对话保存草稿，只在明确点击发送后填入PC并发送；PC未发送草稿不回填手机。
+## Current development and runtime
 
-只剥离桥接。原Orchestrator executor、原ID、3210、任务队列和PC状态增强保留。新桥接有独立ID和服务，不迁走执行器、不开发optional executor adapter、不强制专用后台标签页。
+- mcpoffice workspace `ws_53924e782d`: `D:\workspace\py\chatgpt-pc-bridge`.
+- Installed Bridge ID `heamldipoecpedbnoffiaadjkdagbmoc`, path `runtime/extension`, version 0.2.2.
+- Staged independent service: `127.0.0.1:13213`; private state `var/stage`. Final production 3211 is still owned by the old mobile service.
+- Source files, generated dist, installed runtime and private var are distinct. `scripts/update-staged-runtime.mjs` backs up and updates only the independent runtime at an idle boundary; it never modifies Orchestrator or pairing/journals.
+- Original executor was repeatedly verified online, one v43 executor and zero workflow runs. It was not reloaded, replaced or refactored for these changes.
 
-## 当前实际运行与发布
+## R1 fixes and real evidence
 
-- 独立项目：mcpoffice `D:\workspace\py\chatgpt-pc-bridge`，workspace `ws_53924e782d`；详细交接`docs/HANDOFF.md`。
-- 默认Chrome中的新Bridge扩展已安装并在线：**0.2.1**，ID `heamldipoecpedbnoffiaadjkdagbmoc`，路径`runtime\extension`。
-- 独立服务运行在测试端口 **127.0.0.1:13213**，本次GET `/local/status`为200、extensionConnected=true、pid35200、sessions0、pending0。
-- 原Orchestrator `/api/health`为200，1个`pc-extension-v43-mobile-controls` executor、runs0。没有替换原执行器。
-- 原生产3211尚未切换到新Bridge；旧mobile入口／监听尚未停用。新端口在线不代表正式手机入口已切换。
-- 安装中心实时latest仍为 **iOS0.6.0 Build221**；本轮原生共享标签页客户端**尚未发布**。
+1. The current official user bubble has `.bg-user-message.text-user-message` inside `group/user-message`, without a user role attribute or message ID. Added the narrowly observed selector; exclude hidden branches and toolbars. Stable per-turn/role IDs prevent a React remount of an identical old message from confirming a new Send.
+2. Official SPA navigation retains hidden old composers AND hidden old transcript containers. Both editor selection and transcript selection now target the visible surface, instead of taking the first DOM match. This also prevents old messages from appearing under a new conversation ID.
+3. ProseMirror paragraph boundaries are read as typed newlines. Previously `innerText` added visual blank lines and caused a false draft conflict on multiline text. Empty paragraphs are preserved; PC draft text is still not transmitted to the phone.
+4. Removed the attempted tab-activation workaround after identifying hidden elements as the real issue. No automatic tab/window focus change was added to ordinary Bridge operations.
+5. Search `hasMore` now derives from an actual enabled native more button or remaining scrollable content, not merely from the existence of results.
 
-## 已实现的功能
+**Real official-page checks completed in owned development chats:**
+- Read the old recorded test conversation: one matching user message and one assistant reply are now extracted. Its old `sent_unconfirmed` receipt was left intact; the message was never replayed.
+- New multiline message in the recorded existing chat: `sent_confirmed`, one matching user message and one corresponding reply, same bound tab.
+- New ordinary chat (`ordinary-visible-root` case): `sent_confirmed`, real conversation ID, one matching user message and one reply, same bound tab.
+- New chat under the observed development project (`project-visible-root` case): `sent_confirmed`, correct project ID, one matching user message and one reply, same bound tab.
 
-PC的`shared-page.js`、`shared-background.js`及服务实现了同标签页跟随、一次性compose提交、PC草稿文本过滤、官网UI搜索适配、普通／项目新建、确认按钮、刷新重订阅和旧页面快照过滤。新扩展不再注册重复的PC resilience后台／内容脚本；源码中保留的历史测试模块不代表运行中重复加载。
+Earlier attempts in this iteration failed BEFORE Send while adapting the hidden composer/newline behavior; only explicitly verified `not_sent` cases were retried with new command IDs. One pre-fix ordinary-chat command was sent but returned unconfirmed while the hidden old transcript was selected; its command was not replayed. Later acceptance used separately labeled new cases. Do not clear these journal entries or relabel old unknown results without their own evidence.
 
-iOS源码在 `masakacj/chatgpt-web` 的 `feature/shared-tab-native-070-20261011`。实际测试提交：**b33b1d99f9c240261ae2983ecefa583c64e2363a**。
+The test runner's initial short reply observation can end before the model finishes; subsequent checks used receipt/snapshot GETs only. The three accepted cases above were finally verified with both roles present. Private detailed evidence is `var/stage/r1-r2-evidence.json`; never publish its complete conversation IDs or content. The fixed-string local test-draft cleanup pages were one-off development helpers and are excluded from source exports and removed from installed runtime updates.
 
-新增原生界面、侧边栏、项目列表、历史搜索、同页切换、普通及项目新建、多行输入、各对话独立草稿、仅点击才提交、历史分页、复制／链接、状态提示、明确交互确认、连接设置及键盘收起；原网页作为备用入口。已编码和模拟器测试，不等于全部官网结构与真实iPhone链路已验收。
+## Tests and publication
 
-## 已核实的测试
+Recorded local checks for this implementation: Node 49/49; original shared-tab MV3 13/13; observed roleless-user/hidden-composer/hidden-transcript/paragraph fixture 16/16; original-state coexistence 4/4. Re-run the final source inventory before recording a new source CI result.
 
-| 项目 | 结果及范围 |
-|---|---|
-| Node接口／状态／独立服务／共享协议 | **49/49通过**；本次对现有dist重新运行通过 |
-| 共享标签页Chromium MV3回归 | 上轮**13/13通过**；真实扩展＋本地模拟官网页面，不是实际账号验收 |
-| 双扩展共存专项 | 上轮**4/4通过**；原状态模块保留、新桥接不复制其存储、生成中不写入；不是全套编排工作流回归 |
-| iOS草稿策略 | **24项断言通过** |
-| iOS原生模拟器UI | **8/8通过**：键盘／发送、草稿／搜索切换、普通新建、项目新建、未知回执、PC导航跟随、历史、确认操作 |
-| iOS Release iphoneos目标 | **编译成功**；不是已签名安装或真机验收 |
+Source export now includes Windows PowerShell deployment scripts and excludes var/runtime/private data. The public repository already contained the prior full extraction (`4403027299a8499989cc87b3cbd4b189ec51d168`), but that old CI does not certify this implementation. **R0 latest source publication/clean-checkout CI is being finalized; append the exact resulting commit and run below after verification.** Canonical remote files include all imported modules, so a clean clone does not need an Orchestrator directory.
 
-最新成功iOS Actions run：**38153702824**，本次重新核实全部步骤success。run触发SHA为5b6eb297，工作流内小修正后实际测试SHA为b33b1d99。前两轮5/8、7/8为历史失败，当前已8/8。该工作流不签名、不发布IPA。
+## R2 and later still pending
 
-## 真实官网联调阻塞
+The real official search opens and returns results, but the first broad query did not establish retrieval of a history item outside the loaded sidebar. Full-history coverage, archived/older project results, native pagination/end-of-results and additional real same-tab navigation acceptance remain open. Do not claim all history is supported from the fixture or the small live result set.
 
-上轮在自行建立的测试标签页执行一条明确测试消息，官网已回复`BRIDGE_OK`。首次page_loading错误发生在派发到页面之前，已证明零点击、保留原预约并修正为not_sent；随后一次明确发送返回sent_unconfirmed，没有自动重发。
+The native iOS candidate remains the previously tested branch `feature/shared-tab-native-070-20261011`, actual tested SHA `b33b1d99f9c240261ae2983ecefa583c64e2363a`, run `38153702824`: 8/8 Simulator UI, 24 draft assertions and Release device-target compile. No iOS code was changed during this PC-only repair; those are prior results, not a new run or actual iPhone acceptance. Last verified install-center baseline was 0.6.0 Build221; recheck before publishing.
 
-0.2.1已修复“消息先出现、URL稍后才分配真实对话ID”导致持续loading的问题。修复后只读观察能读取助手回复，但**未提取出该轮用户消息**，因此发送成功的回执判定尚未完整闭环。当前直接阻塞是官网最新用户消息DOM适配／确认，不是原生界面无法编译，也不是需要重构编排器。
-
-本次原验收标签已不在Chrome标签列表中，订阅返回409 page_unavailable；没有另建测试聊天或再次发送。因此BRIDGE_OK／用户消息缺失是上轮已记录观察，不冒充本次重验。
-
-真实官网的历史搜索、项目新建最终验收和真实iPhone配对／发送／覆盖安装仍未完成。模拟页面对应功能通过不能代替上述验收。
-
-## 源码保存
-
-独立PC仓库已含完整一轮源码，代码提交 **4403027299a8499989cc87b3cbd4b189ec51d168**，PC CI **38151385530**成功。此前“只有README、完整源码未上传”已过时。
-
-**后续0.2.1真实网页修复、额外测试及安装／运行脚本尚未全部同步远端**，仍在上述本地工作区。远端代码提交与本地已安装runtime不能混淆；旧CI成功不代表最新本地修改已跑远端CI。私有var、密钥、journal和浏览器资料不上传。
-
-iOS源码仍只在GitHub分支维护，不在MCP另建iOS checkout或保存IPA。
-
-## 下一步
-
-按顶部链接的 R0–R6 详细计划执行。优先修复真实用户消息提取/回执，同步当前源码并行进行；官网主流程通过后完成原生候选版、独立3211切换、真机及正式发布。先准备可安装的签名候选包，不用正式 latest 承担真机测试。
-
-本次计划更新只修改交接文档；没有改运行代码、切换服务、重启Chrome、发送真实消息或发布IPA。不得称全计划已完成。
+Next: finish source/CI traceability; continue R2 real history/search/navigation acceptance; prepare a signed candidate without promoting latest; retire ONLY old mobile handlers/3211 and cut over the independent service with old pairing/journals preserved; test startup/crash recovery; actual iPhone acceptance; then formal promotion. Do not claim all phases complete.

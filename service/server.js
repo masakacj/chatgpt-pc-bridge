@@ -1,6 +1,6 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createStandaloneBridge,PRODUCTION_EXTENSION} from './standalone.js';
+import {createStandaloneBridge,PRODUCTION_EXTENSION,VERSION} from './standalone.js';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const directory=path.resolve(process.env.BRIDGE_DATA_DIR||path.join(root,'data'));
@@ -11,7 +11,7 @@ let service;
 try {
   service=await createStandaloneBridge({directory,extensionIds});
   const address=await service.listen(port,'127.0.0.1');
-  console.log(JSON.stringify({event:'listening',version:'0.1.0',address:address.address,port:address.port,pid:process.pid}));
+  console.log(JSON.stringify({event:'listening',version:VERSION,address:address.address,port:address.port,pid:process.pid}));
 } catch(e) {
   console.error(JSON.stringify({event:'startup_failed',code:e.code||e.message}));
   if(service)await service.close();

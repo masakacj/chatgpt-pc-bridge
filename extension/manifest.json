@@ -1,13 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "ChatGPT PC Bridge (Development)",
-  "version": "0.1.0",
+  "name": "ChatGPT PC Bridge",
+  "version": "0.2.2",
   "minimum_chrome_version": "120",
-  "description": "Standalone local bridge, native conversation state and mobile companion. Not a production migration yet.",
+  "description": "Native phone companion for a shared ChatGPT Chrome tab. Independent from the Orchestrator executor.",
   "permissions": ["tabs", "storage", "alarms", "scripting", "webRequest"],
   "host_permissions": ["https://chatgpt.com/*", "http://127.0.0.1/*"],
   "background": {"service_worker": "background.js", "type": "module"},
-  "content_scripts": [{"matches": ["https://chatgpt.com/*"], "js": ["pc-resilience-content.js"], "run_at": "document_idle"}],
   "options_page": "options.html",
   "action": {"default_title": "ChatGPT PC Bridge"}
 }

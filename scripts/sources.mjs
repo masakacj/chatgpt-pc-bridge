@@ -11,8 +11,10 @@ export async function sources(){
   async function walk(dir){
     for(const entry of await fs.readdir(path.join(ROOT,dir),{withFileTypes:true}).catch(()=>[])){
       const p=path.posix.join(dir,entry.name);
+      // One-off local acceptance cleanup pages are not product source or release artifacts.
+      if(p==='extension/acceptance-tools.html'||p==='extension/acceptance-tools.js')continue;
       if(entry.isDirectory()&&entry.name!=='__pycache__')await walk(p);
-      else if(entry.isFile()&&/\.(js|mjs|json|py|html|css|md|yml|yaml)$/.test(p))found.set(p,await fs.readFile(path.join(ROOT,p)));
+      else if(entry.isFile()&&/\.(js|mjs|json|py|ps1|html|css|md|yml|yaml)$/.test(p))found.set(p,await fs.readFile(path.join(ROOT,p)));
     }
   }
   for(const dir of allowedRoots)await walk(dir);

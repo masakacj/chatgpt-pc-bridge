@@ -1,25 +1,27 @@
 # ChatGPT PC Bridge
 
-Independent Chrome MV3 extension and local Node companion service. Development version 0.1.0; **not installed into the user's production Chrome and not an iOS release**.
+Independent Chrome MV3 bridge and local Node companion service. Current development version **0.2.2**. The installed extension runs against a staged loopback service; this is **not a new iOS release or a completed production cutover**. Read [docs/HANDOFF.md](docs/HANDOFF.md) for exact live status and [the R0–R6 plan](docs/NEXT_DEVELOPMENT_PLAN_20261012.md) for remaining work.
 
-## Implemented
+## Scope
 
-The extension connects directly to this service's `/bridge` WebSocket. The existing `/v1/` mobile protocol, durable command receipts, selected-tab extraction, loaded sidebar/history, native conversation state and limited read-recovery are retained. The standalone service and actual extension have been exercised together in isolated Chromium, including one Send, duplicate suppression, the MV3 idle window and service process restart. No Orchestrator process, executor socket, login copy or real account is used by that test.
+The native iPhone app and PC share one explicitly bound ChatGPT tab. Phone navigation changes that same page; PC navigation within it updates the phone. Selecting another browser tab does not change the binding. Phone drafts stay local until an explicit compose/send command; PC unsent editor text is not returned in shared snapshots.
 
-Orchestrator's optional executor adapter and production migration are **not yet implemented**. Do not load this extension alongside the existing production executor. Full-account history search, new/project chat creation and iOS 0.7.0 remain separate next milestones.
+The original Orchestrator executor, its extension ID, workflow queue, 3210 service and PC state/recovery modules stay in their original project. This extension owns only the mobile bridge and its service. There is **no executor-adapter migration** and no requirement to replace the original extension. Historical state-module files in the test source are not loaded by this extension or staged into its runtime.
 
-## Development
+## Build and tests
 
-Node 22+ and Python with Playwright Chromium are required. Install dependencies with `npm ci`, then `npm test`. `npm run build` creates a complete `dist/bridge` development bundle; `npm run test:browser` tests the actual standalone extension. `npm run test:legacy` runs the unchanged 23-case browser protocol regression, and `npm run test:resilience` runs the slower native-state browser regression. `npm run package` creates a source/runtime ZIP and SHA-256 in `dist`.
+Use Node 22+ and Python with Playwright Chromium. `npm ci --ignore-scripts`, `npm test`, and `npm run check` build and check the complete source inventory. Additional focused suites are `npm run test:shared`, `npm run test:modern-user`, `npm run test:coexistence`, `npm run test:browser`, and `npm run test:legacy`. `npm run package` creates a ZIP and SHA-256 under `dist/`.
 
-The complete development ZIP contains all source modules. Full GitHub source import is still pending at this milestone. The initial mcpoffice extraction workspace uses `source-imports.json` solely to import SHA-pinned, read-only baseline modules into build outputs. These exact modules must be vendored when publishing the source, so that a future clean clone needs no Orchestrator directory. The built runtime does not fetch Orchestrator modules.
+The published repository contains the extracted modules and does not need an Orchestrator checkout to build. `source-imports.json` records one-time SHA-pinned provenance for the original extraction workspace; when local canonical files exist, those files take precedence. CI checks a clean checkout, not a deployment folder. Export includes PowerShell deployment scripts, but excludes `var/`, `runtime/`, credentials, journals, browser profiles and diagnostic artifacts.
 
-## Local service
+## Local service and installation
 
-`npm start` listens on `127.0.0.1:3211`. `BRIDGE_PORT`, `BRIDGE_DATA_DIR` and `BRIDGE_EXTENSION_IDS` configure an isolated test instance. The data directory holds private `pairing.json` (phone key), `extension-auth.json` (extension-only key) and `commands.json` (receipts). They are excluded from source and packages.
+`npm start` listens on `127.0.0.1:3211`. Configure `BRIDGE_PORT`, `BRIDGE_DATA_DIR`, and `BRIDGE_EXTENSION_IDS` for a staged instance. Private `pairing.json` is the phone key, `extension-auth.json` is the distinct extension connection key, and `commands.json` preserves once-only command receipts. Never replace the existing phone pairing with a test key during cutover.
 
-Load `dist/bridge/extension` only into an isolated development Profile. Its options page displays the ID to allow through `BRIDGE_EXTENSION_IDS`; enter the local `ws://127.0.0.1:PORT/bridge` URL and the extension-only key. Do not change the user's installed unpacked extension path or ID during development. The service's public reverse proxy must expose `/v1/` only, never `/bridge` or an administration endpoint.
+The extension options page accepts the local `ws://127.0.0.1:PORT/bridge` endpoint and extension key. The installed path is stable: `runtime/extension`; changing it can change the unpacked extension ID. The public reverse proxy continues to expose only `/v1/`, not the extension WebSocket or local setup pages. `http://127.0.0.1:PORT/local/pair` provides explicit same-origin phone-key reveal, and `/local/status` contains operational status without keys.
 
-The first version accepts the previous `draft` then `send` protocol for compatibility. The user's next iOS iteration requires phone-local drafting and a single explicit compose/send operation; that change is not claimed complete here.
+The service keeps the previous draft/send protocol for old-client compatibility. The new shared-tab client explicitly negotiates `shared-tab-v1`, binds with `followTab: true`, and submits a single `compose` command. Unknown or unconfirmed commands are looked up, never automatically replayed.
 
-See [docs/HANDOFF.md](docs/HANDOFF.md) for exact implemented/tested/deployed distinctions and the next executable steps.
+## Development focus
+
+0.2.2 adapts the actual roleless `.bg-user-message.text-user-message` markup, stabilizes message identities across DOM replacement, skips hidden stale composers and reads ProseMirror paragraph breaks as typed newlines. Regression fixtures contain synthetic text only. Real-web acceptance and release status must be recorded separately from fixture/CI success.

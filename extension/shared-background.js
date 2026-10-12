@@ -13,7 +13,7 @@ export function startSharedBridge({send}) {
    const result=await call(s,{action:'subscribe',expiresAt:s.expiresAt});
    const current=await chrome.tabs.get(s.tabId);
    if(epoch!==s.epoch||result.snapshot.route!==urlInfo(current.url)?.route)throw Error('pc_route_changed');
-   s.documentId=result.snapshot.documentId;s.ready=true;forward(s,result.snapshot);return result;
+   result.snapshot={...result.snapshot,bindingRevision:epoch};s.documentId=result.snapshot.documentId;s.ready=true;forward(s,result.snapshot);return result;
   })();
   s.attaching=task;
   try{return await task}finally{if(s.attaching===task)s.attaching=null;}
@@ -38,8 +38,11 @@ export function startSharedBridge({send}) {
   if(b.action==='renew'){s.expiresAt=Math.min(Date.now()+90000,b.expiresAt);if(s.ready)await call(s,{action:'renew',expiresAt:s.expiresAt}).catch(()=>{});return {ok:true};}
   if(s.expiresAt<Date.now())throw Error('session_expired');
   if(b.action==='refresh')return pageReady(s);
-  if(!s.ready||s.attaching)throw Error('page_loading');
   const write=['compose','interact'].includes(b.action),navigation=['open','new','project'].includes(b.action);
+  if(write&&(!s.ready||s.attaching)){
+   try{await pageReady(s)}catch{return {status:b.action==='compose'?'not_sent':'not_acted',error:'page_loading'}}
+  }
+  if(!s.ready||s.attaching){if(write)return {status:b.action==='compose'?'not_sent':'not_acted',error:'page_loading'};throw Error('page_loading');}
   if((write||navigation)&&s.readOnly)throw Error('read_only');
   if((write||navigation)&&(!Number.isFinite(b.deadline)||Date.now()>b.deadline))throw Error('command_expired');
   let result;
@@ -56,7 +59,7 @@ export function startSharedBridge({send}) {
    const reached=b.action==='open'?current?.conversationId===b.targetConversationId:b.action==='new'?current&&current.conversationId===''&&(!b.projectId||current.route.startsWith('/g/'+b.projectId)):false;
    if(!reached)throw e;return pageReady(s);
   }
-  if(result?.snapshot)forward(s,result.snapshot);return result;
+  if(result?.snapshot){result.snapshot={...result.snapshot,bindingRevision:s.epoch};forward(s,result.snapshot);}return result;
  }
  function handle(b){
   if(b?.type!=='mobile_command')return false;
@@ -82,5 +85,5 @@ export function startSharedBridge({send}) {
  });
  chrome.tabs.onRemoved.addListener(tabId=>{for(const s of sessions.values())if(s.tabId===tabId){sessions.delete(s.id);send({type:'mobile_tab_changed',sessionId:s.id,tabId,closed:true})}});
  function disconnected(){for(const s of sessions.values())call(s,{action:'unsubscribe'}).catch(()=>{});sessions.clear();}
- return {handle,disconnected,audit:()=>({version:'0.2.0',sharedSessions:sessions.size})};
+ return {handle,disconnected,audit:()=>({version:'0.2.2',sharedSessions:sessions.size})};
 }

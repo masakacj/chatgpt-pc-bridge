@@ -37,7 +37,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: pip install playwright==1.63.0
       - run: playwright install --with-deps chromium
-      - run: npm run test:browser && npm run test:legacy
+      - run: npm run test:browser && npm run test:legacy && npm run test:shared && npm run test:modern-user && npm run test:coexistence
       - run: npm run package
       - uses: actions/upload-artifact@v4
         with:

@@ -16,4 +16,9 @@ form.addEventListener('submit',async event=>{
   }catch(e){status.textContent=e.message;}
 });
 document.querySelector('#refresh').onclick=refresh;
+document.querySelector('#reload').onclick=async()=>{
+ const s=await chrome.runtime.sendMessage({type:'bridge_audit'});
+ if(s?.mobile?.sharedSessions||s?.legacy?.sessions){status.textContent='请先在手机断开连接，再重新加载扩展。';return;}
+ chrome.runtime.reload();
+};
 refresh();

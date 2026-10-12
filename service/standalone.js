@@ -3,8 +3,9 @@ import path from 'node:path';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {WebSocketServer,WebSocket} from 'ws';
 import {createMobileBridge} from './mobile-bridge.js';
+import {installLocalPairing} from './local-pairing.js';
 
-export const VERSION='0.1.0';
+export const VERSION='0.2.2';
 export const PRODUCTION_EXTENSION='hkpkilpjbeneliaiafdbkaomedgkkcmi';
 const local=address=>address==='127.0.0.1'||address==='::1'||address==='::ffff:127.0.0.1';
 const sameKey=(a,b)=>typeof a==='string'&&/^[A-Za-z0-9_-]{43}$/.test(a)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
@@ -22,6 +23,7 @@ export async function createStandaloneBridge({directory,extensionIds=[PRODUCTION
 
   let peer=null,peerMeta=null,closing=false;
   const bridge=await createMobileBridge({directory,timeoutMs,
+    configureLocalApp:(app,getToken)=>installLocalPairing(app,getToken,()=>({ok:true,pid:process.pid,version:VERSION,extensionConnected:peer?.readyState===WebSocket.OPEN,extension:peerMeta,...bridge.stats()})),
     send:message=>{if(peer?.readyState!==WebSocket.OPEN)return false;peer.send(JSON.stringify(message));return true;}
   });
   const wss=new WebSocketServer({noServer:true,maxPayload:650000});
