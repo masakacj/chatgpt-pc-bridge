@@ -5,8 +5,8 @@ import {WebSocketServer,WebSocket} from 'ws';
 import {createMobileBridge} from './mobile-bridge.js';
 import {installLocalPairing} from './local-pairing.js';
 
-export const VERSION='0.2.2';
-export const PRODUCTION_EXTENSION='hkpkilpjbeneliaiafdbkaomedgkkcmi';
+export const VERSION='0.2.3';
+export const PRODUCTION_EXTENSION='heamldipoecpedbnoffiaadjkdagbmoc';
 const local=address=>address==='127.0.0.1'||address==='::1'||address==='::ffff:127.0.0.1';
 const sameKey=(a,b)=>typeof a==='string'&&/^[A-Za-z0-9_-]{43}$/.test(a)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 

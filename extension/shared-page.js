@@ -2,7 +2,7 @@
 (() => {
  'use strict';
  if(location.origin!=='https://chatgpt.com'||window!==top)return;
- if(globalThis.__CGPT_SHARED_PAGE__?.version==='0.2.2-r1.5')return;
+ if(globalThis.__CGPT_SHARED_PAGE__?.version==='0.2.3-r2.3')return;
  globalThis.__CGPT_SHARED_PAGE__?.destroy?.();
  const p=globalThis.__CGPT_BRIDGE_PRESENTATION__;if(!p)return;
  const ids=new WeakMap(),commands=new Map(),known=new Map();
@@ -36,7 +36,24 @@
  const nav=()=>[...document.querySelectorAll('aside,nav,[data-testid="sidebar"]')].find(n=>n.querySelector('a[href*="/c/"],[data-app-action-sidebar-project-id]'));
  let session=null,expiry=0,route=location.pathname,documentId=crypto.randomUUID(),previousTurn=null,routePending=false;
  let composing=false,pcEditRevision=0,timer=null,lease=null,observer=null,tailObserver=null,watchedRoot=null,watchedTail=[],lastHash='',publishing=false,reschedule=false,requestedProject=null;
- let actions=p.createActions(documentId,turnID,conversation),lastQuery='';
+ let actions=p.createActions(documentId,turnID,conversation),lastQuery='',searchSnapshot=null,lastContentSnapshot=null;
+ function searchSurface(){
+  for(const root of document.querySelectorAll('[role="dialog"],[role="search"],[cmdk-root]')){
+   if(!p.visible(root))continue;
+   const input=[...root.querySelectorAll('input[role="combobox"],input[type="search"],input[placeholder]')].find(e=>p.visible(e)&&(e.getAttribute('role')==='combobox'||e.type==='search'||/搜索|搜尋|Search/i.test((e.getAttribute('placeholder')||'')+' '+(e.getAttribute('aria-label')||''))));
+   if(input)return {root,input};
+  }
+  return null;
+ }
+ async function dismissSearch(){
+  const surface=searchSurface();if(!surface){searchSnapshot=null;return;}
+  const close=[...surface.root.querySelectorAll('button')].find(b=>p.visible(b)&&/^(?:关闭|關閉|关闭搜索|關閉搜尋|Close|Close search|Dismiss)$/i.test(label(b)));
+  if(close)close.click();
+  else surface.input.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true}));
+  for(let i=0;i<6&&searchSurface();i++)await pause(80);
+  if(searchSurface())throw Error('close_search_before_navigation');
+  searchSnapshot=null;
+ }
  function scope(){const e=editor();if(!e)return document.createElement('div');const form=e.closest('form,[data-composer-body]');if(form)return form;let n=e.parentElement;for(let i=0;n&&n!==document.body&&i<9;i++,n=n.parentElement)if(n.querySelector('button')&&!n.querySelector('[data-turn-key]'))return n;return document.createElement('div')}
  function sendButton(){return [...scope().querySelectorAll('button')].find(b=>p.visible(b)&&!b.disabled&&b.getAttribute('aria-disabled')!=='true'&&!/stop|停止|voice|听写|聽寫|dictat|mic/i.test(label(b))&&(/^(?:Send(?: prompt| message)?|发送(?:提示|消息)?|傳送(?:提示|訊息)?)(?:\s*[（(][^）)]*[）)])?$/i.test(label(b))||b.getAttribute('data-testid')==='send-button'||b.id==='composer-submit-button'))||null}
  function state(){
@@ -89,17 +106,26 @@
   const limited=out.slice(-24);while(limited.length>1&&JSON.stringify(limited).length>160000)limited.shift();return limited;
  }
  function updateRoute(){
-  if(route!==location.pathname){const oldConversation=route.match(/(?:^|\/)c\/([A-Za-z0-9_-]{12,80})(?:\/|$)/)?.[1]||'';previousTurn=watchedTail.at(-1)?turnID(watchedTail.at(-1)):null;route=location.pathname;documentId=crypto.randomUUID();routePending=Boolean(oldConversation&&conversation()&&oldConversation!==conversation());actions=p.createActions(documentId,turnID,conversation);lastHash=''}
+  if(route!==location.pathname){const oldConversation=route.match(/(?:^|\/)c\/([A-Za-z0-9_-]{12,80})(?:\/|$)/)?.[1]||'';previousTurn=watchedTail.at(-1)?turnID(watchedTail.at(-1)):null;route=location.pathname;documentId=crypto.randomUUID();searchSnapshot=null;lastContentSnapshot=null;routePending=Boolean(oldConversation&&conversation()&&oldConversation!==conversation());actions=p.createActions(documentId,turnID,conversation);lastHash=''}
   if(routePending){const latest=turnID(turns().at(-1));if(!conversation()||latest&&latest!==previousTurn)routePending=false;}
  }
  async function snapshot(){
-  updateRoute();const currentDoc=documentId,value=draft(),all=routePending||!conversation()?[]:messages();
-  const status=routePending?'loading':state(),interactions=routePending?[]:actions.collect(turns().at(-1));
+  updateRoute();
+  // Official search makes the conversation aria-hidden. Preserve its last
+  // captured transcript rather than publishing an empty/loading conversation.
+  const preserved=searchSnapshot?.route===location.pathname?searchSnapshot:lastContentSnapshot?.route===location.pathname?lastContentSnapshot:null;
+  if(preserved&&searchSurface())return {...preserved,canSend:false,searchActive:true};
+  if(searchSnapshot&&!searchSurface())searchSnapshot=null;
+  const currentDoc=documentId,value=draft(),all=routePending||!conversation()?[]:messages();
+  const pageState=routePending?'loading':state();
+  const status=conversation()&&all.length===0&&pageState==='idle'?'loading':pageState;
+  const interactions=routePending?[]:actions.collect(turns().at(-1));
   const projectId=requestedProject&&project()?.startsWith(requestedProject)?requestedProject:project();
   const snap={schema:1,sharedTab:true,documentId:currentDoc,conversationId:conversation(),route:location.pathname,projectId,temporary:!conversation(),title:conversation()?document.title.replace(/\s*[-–]\s*ChatGPT$/,'').slice(0,200):'新聊天',messages:all,status,
    draft:'',draftHash:await sha(value),pcDraftOccupied:Boolean(value.trim()),composing,canSend:Boolean(editor())&&!composing&&!value.trim()&&!['running','waiting','loading'].includes(status),
    responsePhase:interactions.length?'waiting':status==='running'?(all.some(m=>m.role==='assistant'&&m.turnId===turnID(turns().at(-1)))?'responding':'thinking'):status,interactions,
    historyCursor:all[0]?.turnId||null,hasOlder:!routePending&&Boolean(conversation())&&page().hasMore,historyPartial:true,unsupportedTools:Boolean(transcript()?.querySelector('iframe'))};
+  if(snap.messages.length||snap.temporary)lastContentSnapshot=snap;
   return snap;
  }
  function bind(){
@@ -168,33 +194,70 @@
  }
  async function search(b){
   const query=String(b.query||'').trim();if(!query||query.length>200)throw Error('invalid_query');
-  let dialog=[...document.querySelectorAll('[role="dialog"],[role="search"],[cmdk-root]')].find(p.visible);
-  let input=dialog?.querySelector('input[role="combobox"],input[type="search"],input[placeholder],input');
-  if(!input){
+  let surface=searchSurface();
+  if(!searchSnapshot||searchSnapshot.route!==location.pathname)searchSnapshot=await snapshot();
+  if(!surface){
    const button=[...(nav()||document).querySelectorAll('button,[role="button"]')].find(n=>p.visible(n)&&/^(?:搜索|搜尋|搜索聊天|搜尋聊天|Search|Search chats)$/i.test(label(n)));
-   if(!button)throw Error('official_search_unavailable');button.click();
-   for(let i=0;i<25&&!input;i++){await pause(80);dialog=[...document.querySelectorAll('[role="dialog"],[role="search"],[cmdk-root]')].find(p.visible);input=dialog?.querySelector('input[role="combobox"],input[type="search"],input[placeholder],input')}
+   if(!button){searchSnapshot=null;throw Error('official_search_unavailable')}
+   button.click();
+   // A bounded observer avoids 25 sequential timer waits in a background tab.
+   if(!searchSurface())await new Promise(resolve=>{
+    const observer=new MutationObserver(()=>{if(searchSurface())finish()});
+    const timer=setTimeout(finish,3000);
+    function finish(){clearTimeout(timer);observer.disconnect();resolve()}
+    observer.observe(document.body,{subtree:true,childList:true});
+   });
+   surface=searchSurface();
   }
-  if(!input)throw Error('official_search_unavailable');
-  if(!b.more||query!==lastQuery){inputValue(input,query);lastQuery=query;await pause(500)}
-  else{const more=[...dialog.querySelectorAll('button')].find(n=>p.visible(n)&&/^(?:加载更多|显示更多|Show more|Load more)$/i.test(label(n)));if(more)more.click();else{const scroller=[...dialog.querySelectorAll('*')].find(n=>n.scrollHeight>n.clientHeight+30&&/(auto|scroll)/.test(getComputedStyle(n).overflowY));if(scroller)scroller.scrollTop=scroller.scrollHeight;}await pause(400)}
-  let items=[],prior='',stable=0;
-  for(let i=0;i<20;i++){items=linkEntries(dialog,'official_search');const value=items.map(x=>x.id).join('|');if(value===prior)stable++;else stable=0;prior=value;if(items.length&&stable>=2)break;await pause(120)}
-  const loading=Boolean(dialog.querySelector('[role="progressbar"],[aria-busy="true"]'));
-  const empty=/没有找到|未找到|无结果|沒有結果|No results|No conversations found/i.test(dialog.textContent||'');
+  if(!surface)throw Error('official_search_unavailable');
+  const {root:dialog,input}=surface;
+  const state=()=>{
+   const items=linkEntries(dialog,'official_search');
+   const busy=[...dialog.querySelectorAll('[role="progressbar"],[aria-busy="true"]')].some(p.visible);
+   const empty=/没有找到|未找到|无结果|沒有結果|找不到|No results|No conversations found/i.test(dialog.innerText||dialog.textContent||'');
+   return {items,busy,empty,key:items.map(x=>x.id).join('|')+'|'+busy+'|'+empty};
+  };
+  const before=state(),changedQuery=query!==lastQuery||input.value!==query;
+  let timedOut=false,observedChange=false;
+  await new Promise(resolve=>{
+   let settle=null;
+   const finish=()=>{clearTimeout(timer);clearTimeout(settle);observer.disconnect();resolve()};
+   const inspect=()=>{
+    const value=state();if(value.key!==before.key)observedChange=true;
+    clearTimeout(settle);
+    if(!value.busy&&(value.items.length||value.empty)&&(!changedQuery||observedChange))settle=setTimeout(finish,150);
+   };
+   const observer=new MutationObserver(inspect);
+   const timer=setTimeout(()=>{timedOut=true;finish()},5500);
+   observer.observe(dialog,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['aria-busy','hidden','style']});
+   if(!b.more||changedQuery){lastQuery=query;inputValue(input,query)}
+   else{
+    const more=[...dialog.querySelectorAll('button')].find(n=>p.visible(n)&&!n.disabled&&/^(?:加载更多|显示更多|Show more|Load more)$/i.test(label(n)));
+    if(more)more.click();
+    else{const scroller=[dialog,...dialog.querySelectorAll('*')].find(n=>n.clientHeight>0&&n.scrollHeight>n.clientHeight+30&&/(auto|scroll)/.test(getComputedStyle(n).overflowY));if(scroller)scroller.scrollTop=scroller.scrollHeight;}
+   }
+   inspect();
+  });
+  const result=state();
+  // Never return the preceding query's stale hits as the new query's results.
+  const unresolved=result.busy||timedOut&&changedQuery&&!observedChange&&!result.empty;
+  const items=unresolved?[]:result.items;
   const moreButton=[...dialog.querySelectorAll('button')].find(n=>p.visible(n)&&!n.disabled&&/^(?:加载更多|显示更多|Show more|Load more)$/i.test(label(n)));
-  const scrollable=[...dialog.querySelectorAll('*')].find(n=>n.clientHeight>0&&n.scrollHeight>n.clientHeight+30&&/(auto|scroll)/.test(getComputedStyle(n).overflowY));
+  const scrollable=[dialog,...dialog.querySelectorAll('*')].find(n=>n.clientHeight>0&&n.scrollHeight>n.clientHeight+30&&/(auto|scroll)/.test(getComputedStyle(n).overflowY));
   const hasMore=Boolean(moreButton||scrollable&&scrollable.scrollTop+scrollable.clientHeight<scrollable.scrollHeight-3);
-  return {projects:catalog().projects,chats:items,partial:true,sidebarAvailable:true,source:'official_search',query,loading,emptyConfirmed:!loading&&empty,hasMore};
+  await publish();
+  return {projects:catalog().projects,chats:items,partial:true,sidebarAvailable:true,source:'official_search',query,loading:unresolved,emptyConfirmed:!unresolved&&result.empty&&items.length===0,hasMore:!unresolved&&hasMore};
  }
  async function navigation(b){
-  routeCheck(b);if(composing)throw Error('pc_composing');if(draft().trim())throw Error('pc_draft_blocks_navigation');
+  const searching=searchSurface();
+  if(searching&&b.action!=='open')await dismissSearch();
+  routeCheck(b);if(composing)throw Error('pc_composing');if(draft().trim()||searching&&searchSnapshot?.pcDraftOccupied)throw Error('pc_draft_blocks_navigation');
   const old=route,oldTurn=turnID(turns().at(-1));let control;
   if(b.action==='open'){
    const entry=known.get(b.targetConversationId);if(!entry)throw Error('conversation_not_observed');
    if(entry.id===conversation())return {snapshot:await snapshot()};
-   control=[...document.querySelectorAll('a[href]')].find(a=>{try{return new URL(a.href,location.href).pathname===entry.path}catch{return false}});
-   if(control)control.click();else location.assign(entry.path); // Only previously observed official link, never caller URL.
+   control=[...document.querySelectorAll('a[href]')].find(a=>{try{return p.visible(a)&&new URL(a.href,location.href).pathname===entry.path}catch{return false}});
+   if(control)control.click();else {if(searching)await dismissSearch();if(draft().trim())throw Error('pc_draft_blocks_navigation');location.assign(entry.path);} // Only previously observed official link, never caller URL.
   }else if(b.action==='new'){
    if(b.projectId){
     const row=[...document.querySelectorAll('[data-app-action-sidebar-project-id]')].find(n=>n.getAttribute('data-app-action-sidebar-project-id')===b.projectId);if(!row)throw Error('project_not_observed');
@@ -237,5 +300,5 @@
  const compEnd=()=>{composing=false;schedule()};
  function destroy(){stop();chrome.runtime.onMessage.removeListener(onMessage);document.removeEventListener('input',input,true);document.removeEventListener('compositionstart',compStart,true);document.removeEventListener('compositionend',compEnd,true)}
  chrome.runtime.onMessage.addListener(onMessage);document.addEventListener('input',input,true);document.addEventListener('compositionstart',compStart,true);document.addEventListener('compositionend',compEnd,true);
- globalThis.__CGPT_SHARED_PAGE__={version:'0.2.2-r1.5',snapshot,destroy};
+ globalThis.__CGPT_SHARED_PAGE__={version:'0.2.3-r2.3',snapshot,destroy};
 })();

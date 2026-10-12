@@ -1,76 +1,65 @@
 # PC Bridge / 原生 iOS — 当前开发交接
 
-更新：2026-10-12。**R0 源码固化及独立仓库 CI 已验收；R1 用户消息提取与真实发送确认已验收；R2 核心官网流程已有真实通过记录，但完整范围尚未结束。正式3211及新版iOS未发布。** 后续路线见 `docs/NEXT_DEVELOPMENT_PLAN_20261012.md`。
+更新：2026-10-12，本轮继续 R2 / R3。**Bridge 0.2.3 已在测试通道运行；iOS 0.7.0 Build1 已生成签名候选包，未推广正式 latest。R2 全范围和 R4/R5/R6 尚未完成。** 仍按 `docs/NEXT_DEVELOPMENT_PLAN_20261012.md` 执行。
 
-## 范围不变
+## 产品边界
 
-SwiftUI原生手机端，结构化镜像一个明确绑定的PC ChatGPT标签页。手机导航操作同页；PC页内导航手机跟随；激活其他Chrome标签不更换绑定。手机草稿按对话独立保存，明确点击发送才提交；PC未发送文字不回填手机。
+原生 SwiftUI 手机端，结构化镜像一个明确绑定的 PC ChatGPT 标签页。手机切换／新建操作同一页；PC 页内导航时手机跟随；切其他浏览器标签不改变绑定。手机草稿按对话独立，只在发送时提交，PC 未发送文字不回填。
 
-只剥离桥接。原Orchestrator executor、原ID/存储、3210、任务队列和PC状态增强保留。新Bridge有独立ID和服务；不迁移执行器、不做optional executor adapter、不强制后台专用标签。
+只拆桥接。原 Orchestrator executor、原 ID/存储、3210、任务队列和 PC 状态增强保留。独立 Bridge ID 为 `heamldipoecpedbnoffiaadjkdagbmoc`。不做 executor adapter，不替换原扩展，不默认另开专用后台镜像标签。
 
-## R0：已验收
+## 本轮 R2 修改
 
-准确代码提交：**c9c6676ca878dd10f15ac4911fdb62929aad0683**，仓库 `masakacj/chatgpt-pc-bridge`，版本 **0.2.2**。
+`extension/shared-page.js` 的搜索/加载边界已增量修复：
 
-准确CI：**38189275456**，Node22、Node24、browser三个job全部success。CI从独立仓库checkout构建，不存在旧Orchestrator目录依赖。浏览器job执行旧独立链路、兼容协议、共享标签页、新官网消息结构和共存回归，随后打包成功。
+- 官方搜索弹层会把底下的正文设为 aria-hidden。保留当前已捕获的会话内容，不把搜索中的正文误报为空白/加载失败；PC 先打开搜索的场景也复用同一路径。
+- 将后台标签中容易被节流的连续定时等待，改成搜索弹层范围内的 MutationObserver 和有上限的等待；不存在常驻全正文扫描。
+- 明确区分 loading、emptyConfirmed、hasMore；新查询不能返回旧查询结果。点击官网更多入口后重新确认是否还有更多。
+- 从搜索结果导航时保留原生链接点击；其他导航先关闭搜索，再检查 PC 草稿。对话路由变化会清掉旧搜索快照，不能复用前一对话内容。
+- 已有 conversationId 但正文尚未加载时不再报告 idle/canSend；继续显示 loading。
+- 服务默认允许的扩展 ID 改为独立 Bridge ID，而不是原编排器 ID；显式环境配置仍可用于隔离测试。
 
-已逐文件核对：导出的**56个文件**与该提交Git blob一致；已安装runtime的**19个文件**与同份源码一致，差异均为0。Windows部署脚本3份已包含。`var/`、密钥、journal、profile、runtime及临时验收清理页没有进入发布源码；临时清理页已从安装runtime移除。此后的handoff文档提交不改变上述受测代码SHA。
+## 本轮实际测试与限制
 
-## R1：真实网页发送链路已验收
+本地：49/49 Node，30 个 JS 语法/结构检查，18/18 新搜索边界 MV3，16/16 新官网用户气泡/隐藏 DOM 回归，4/4 原状态模块共存专项通过。搜索边界包括空结果、旧查询结果清除、更多结果结束、搜索弹层正文保留、PC 主动打开搜索、加载未完成不误报空闲。
 
-本轮修复 `extension/shared-page.js`：
+真实官网：使用已记录开发会话，不向业务聊天写入。最新独立搜索复测为 **无结果0条 → Wake on LAN结果4条 → 再次无结果0条**；空结果均 emptyConfirmed=true、loading=false、hasMore=false，返回原开发会话，**本轮真实消息提交0次**。该次浏览器标签总集合有变化，未将“所有标签数量完全不变”算作通过。
 
-1. 官网用户气泡使用 `.bg-user-message.text-user-message`／`group/user-message`，但没有user角色属性或message ID。补足准确提取规则，排除工具栏和隐藏分支。
-2. 同一SPA内保留隐藏旧输入框；只选择可见且可编辑的输入框，不再拿第一个DOM匹配。
-3. ProseMirror多段落的显示空行不等于实际输入换行；按段落边界读取，保留用户的空段落，避免中文多行文本误报draft_conflict。
-4. 同一SPA也保留隐藏旧正文；只读取当前可见transcript，避免新会话ID下出现旧会话消息。
-5. 使用稳定的轮次／角色消息标识；旧气泡被React重建、内容恰好相同时，不会被误判为新Send。
+真实项目旧聊天/长历史连续性本轮仍未通过完整验收：一次检查命中正文尚未加载、误报idle；已补代码及模拟回归。后续检查仍需要真实连续分页、完整加载、返回原会话的证据，不能把0条消息/0页算通过。归档范围、全部分页边界、复杂交互及首次连接时搜索弹层已打开的完整恢复仍需补验。
 
-曾尝试的“激活标签页修复输入焦点”已撤销，真正问题是隐藏DOM。普通桥接操作没有新增自动抢占窗口／标签焦点的逻辑。
+前轮 R1 结果继续有效，不重做/重发：现有中文多行、普通新建首发、项目内首发均曾 sent_confirmed，对应用户消息与回复各1条。旧 sent_unconfirmed 记录保留。前轮 R0 受测代码 c9c6676ca878dd10f15ac4911fdb62929aad0683 / CI38189275456；本轮最新代码的发布 SHA/CI 在发布完成后追加，不把旧 CI 当本轮证据。
 
-**真实官网验收，而非只依赖模拟页面：**
+## R3：签名候选包已产出
 
-| 场景 | 结果 |
-|---|---|
-| 只读恢复此前测试会话 | 读出1条对应用户消息及1条助手回复；旧sent_unconfirmed记录保留，没有重发 |
-| 现有聊天发送中文多行测试消息 | sent_confirmed；1条新用户消息＋1条对应回复；同一绑定tab |
-| 普通新建首发（visible-root独立用例） | sent_confirmed；产生真实conversationId；用户消息和回复各1条；同一tab |
-| 开发项目内新建首发（visible-root独立用例） | sent_confirmed；projectId正确；用户消息和回复各1条；同一tab |
+**ChatGPT Web iOS 0.7.0 / Build1**，Bundle ID `com.masakacj.chatgptweb`。
 
-测试初期出现的隐藏输入框／换行失败均在点击前被判定为not_sent；只对这种已证明未发送的失败发起新命令，不重放原commandId。另有一条修复隐藏正文前的普通新聊天测试返回sent_unconfirmed；保留该记录，后续使用有明确新标签的独立用例，没有重发它。旧未知状态不能直接改成成功。
+候选ID：`d029f722-9ee4-452a-ab84-947c59c263d9`。
+安装页：https://ipa.78175132.xyz/candidate/d029f722-9ee4-452a-ab84-947c59c263d9
+元数据：https://ipa.78175132.xyz/api/v1/apps/chatgpt-web/candidate
 
-实际回复有时晚于测试脚本的首轮短观察窗口；最终验收使用GET读取回执／快照，确认上述三个成功场景的用户消息和回复均存在。原始验收记录在私有 `var/stage/r1-r2-evidence.json`，不上传正文、配对信息或完整私人日志。
+候选工作流：`masakacj/chatgpt-web/.github/workflows/shared-tab-candidate.yml`。
+分支：`feature/shared-tab-native-070-20261011`。
+准确候选源码提交：`ca6a2e0a57cc28beaf361c00abe36fbdb1ddcc7c`。
+成功 Actions run：`38191446488`。
+签名IPA SHA256：`4716f4eb5d938dc6715bccaaed5619097be1f5bd6726dae11da1046eabfd8caf`。
 
-## R2：已推进的真实官网验证
+工作流核对 App/资源/测试输入与此前实际受测 `b33b1d99f9c240261ae2983ecefa583c64e2363a` 完全一致，因此复用其8/8模拟器结果，不宣称本轮又跑8/8。本轮重新执行24项草稿断言、Release设备目标编译、远端签名、GET manifest和IPA；验证ZIP CRC、Bundle/Version/Build、主App及内嵌扩展签名/Profile存在。产物元数据已在内存读回；未向MCP目录写IPA。
 
-真实官网搜索“Wake on LAN”返回4个不在当前已加载侧栏中的历史结果；选择匹配的旧对话后，在**同一个绑定标签页**读取到6条历史消息，状态completed，没有新建浏览器标签或发送消息。检查后成功返回原开发测试会话。
+**候选可安装不等于真机验收完成。正式PC3211尚未切换，新App目前不能被称为现有手机通道的已完成正式升级。** 签名候选与正式推广已经分开，后续R4/R5通过后再推进R6。
 
-搜索“是否还有更多”已改成检查实际可用的更多按钮或未滚到底的列表，不再只要有结果就一直返回true。有限结果集回归通过；上述真实搜索的hasMore=false。
+## 签名服务最小改造与源码
 
-这证明旧历史检索／打开路径工作，但**不等于全账号、归档、所有项目及所有分页边界均已验收**。仍需继续更多分页、无结果、项目内旧聊天、归档可见范围、长历史连续性、真实PC主动导航和复杂交互兼容性验收。
+现有服务新增 `POST /api/v1/sign?channel=candidate`，只允许本项目固定候选分支/工作流。候选记录存于独立 candidates/candidate 字段，不修改正式 latest/history，也不影响FileMann/Laocai/dylib。
 
-## 当前测试证据
+候选权限/保留/查找/不修改stable等10/10单元测试通过，已部署。正式latest在签名前后逐值一致，仍为 **0.6.0 Build221**。未改证书/配对密钥或现有正式签名权限。
 
-| 测试 | 最新结果 |
-|---|---|
-| Node协议／状态／独立服务 | 49/49通过；CI分别在Node22、24通过 |
-| 共享标签页原模拟网页 | 13/13通过；本轮CI通过 |
-| 新官网用户气泡＋隐藏旧DOM＋富文本段落回归 | 16/16通过；本轮本地及CI通过 |
-| 原状态模块与新桥接共存专项 | 4/4通过；本轮本地及CI通过 |
-| JavaScript语法／结构 | 30个文件通过 |
+源码项目：mcpdebian `/home/devspace/ipa-signer`，workspace `ws_3a9515d2c0`；线上 `/opt/ipa-signer`。
+源码保存在私有 `masakacj/laocai-manager` 分支 `feature/ipa-native-candidate-20261012`，提交 **c5b9b7b652a944925659cdd674137fc941071c15**，路径 `infra/ipa-signer/`。原已部署服务与其main基线不同，故保存隔离分支，没有覆盖main或未经核对合并。详细说明 `CANDIDATE_HANDOFF.md`。
 
-共存专项不是全部编排工作流重跑。原编排器现场健康检查仍为1个v43 executor、runs0，未重载或改造该执行器。
+## 运行与下一步
 
-## 实际运行与iOS发布
+PC独立项目：mcpoffice `D:\workspace\py\chatgpt-pc-bridge`，workspace `ws_53924e782d`，安装路径 `runtime/extension`，版本0.2.3；仍是测试端口13213。原3210正常，正式3211未切换，旧mobile入口尚未停用。
 
-独立项目：mcpoffice `D:\workspace\py\chatgpt-pc-bridge`，workspace `ws_53924e782d`。安装落地点 `runtime/extension`；扩展 **0.2.2**，ID `heamldipoecpedbnoffiaadjkdagbmoc`。
+R0/R1前轮已验收；R2进行中；R3签名候选子项已完成、整体验证仍进行中；R4/R5/R6未完成。
 
-本次最终检查：独立服务 `127.0.0.1:13213` 为200，pid45572、extensionConnected=true、sessions0、pending0、journalCount9。原Orchestrator3210为200，1个 `pc-extension-v43-mobile-controls`，runs0。**正式3211仍未切换**，旧手机入口没有用测试配对替换。
-
-安装中心本次实时GET仍为 **iOS0.6.0 Build221**。本轮没有改iOS代码或发布IPA。既有原生候选分支 `feature/shared-tab-native-070-20261011`，受测SHA `b33b1d99f9c240261ae2983ecefa583c64e2363a`、run38153702824，此前8/8模拟器、24项草稿断言、设备目标编译通过；不冒充本轮重测或真机验收。
-
-## 下一执行点
-
-继续R2剩余真实官网验收；随后R3生成可安装但不覆盖正式latest的签名候选；R4仅停用旧mobile入口／转发／3211并迁入独立服务，保留正式配对和所有回执，验证开机／异常恢复与回退；R5真实iPhone验收；R6正式推广。
-
-不要再从“用户消息未提取”“只有0.1.0源码”“需要替换编排器”重新做起。后续修改沿当前代码提交，按改动范围增量测试。全计划仍未完成，不得以本轮PC验收替代正式切换、真机或发布。
+下一步先补真实项目旧聊天/历史连续性及首次连接搜索态恢复，再执行R4：仅停旧mobile入口/转发/3211，迁移正式配对与回执，保留原executor/3210，验证常驻/异常恢复及回退。R5使用本次签名候选在实际iPhone验收，R6才推广正式latest。不要重复开发候选签名通道或重做已验收的用户消息提取。

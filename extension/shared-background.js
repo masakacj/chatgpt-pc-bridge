@@ -85,5 +85,5 @@ export function startSharedBridge({send}) {
  });
  chrome.tabs.onRemoved.addListener(tabId=>{for(const s of sessions.values())if(s.tabId===tabId){sessions.delete(s.id);send({type:'mobile_tab_changed',sessionId:s.id,tabId,closed:true})}});
  function disconnected(){for(const s of sessions.values())call(s,{action:'unsubscribe'}).catch(()=>{});sessions.clear();}
- return {handle,disconnected,audit:()=>({version:'0.2.2',sharedSessions:sessions.size})};
+ return {handle,disconnected,audit:()=>({version:'0.2.3',sharedSessions:sessions.size})};
 }

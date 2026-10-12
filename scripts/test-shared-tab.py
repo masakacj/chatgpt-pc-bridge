@@ -57,6 +57,12 @@ def run():
     def compose(value,s=None,key=None):
      s=s or fresh();b={'commandId':key or str(uuid.uuid4()),'action':'compose','documentId':s['documentId'],'baseDraftHash':s['draftHash'],'text':value,'projectId':s.get('projectId')};return req(prefix+'/commands',b),b
     results.append('bind a single existing tab; snapshot excludes PC draft text and reasoning')
+    if page.evaluate('Boolean(window.searchBoundaryFixture)'):
+     page.evaluate("()=>{window.savedTranscript=document.querySelector('.transcriptContent').innerHTML;document.querySelector('.transcriptContent').innerHTML='';}")
+     code,hydrating=req(prefix+'?refresh=1');assert code==200 and hydrating['snapshot']['status']=='loading' and not hydrating['snapshot']['canSend']
+     page.evaluate("()=>{document.querySelector('.transcriptContent').innerHTML=window.savedTranscript;}")
+     code,restored=req(prefix+'?refresh=1');assert code==200 and restored['snapshot']['messages']
+     results.append('known conversation with unhydrated body stays loading instead of falsely reporting idle')
     if page.evaluate('Boolean(window.modernUserFixture)'):
      user=next(m for m in snap['messages'] if m['role']=='user')
      assert user['text']=='Question '+A and 'Copy user message' not in user['text']
@@ -95,9 +101,23 @@ def run():
     page.wait_for_timeout(600);assert '手机只点一次发送' in fresh()['messages'][-1]['text']
     results.append('single compose POST fills and sends once; PC draft conflict stays on PC; duplicate command does not replay')
     original=fresh();code,library=action('catalog');assert code==200 and B not in [x['id'] for x in library['chats']]
+    if page.evaluate('Boolean(window.searchBoundaryFixture)'):
+     page.evaluate('()=>searchOpen()')
+     code,pc_search=req(prefix+'?refresh=1');assert code==200 and pc_search['snapshot']['messages'] and pc_search['snapshot'].get('searchActive')
+     results.append('PC-opened search dialog also preserves the previously mirrored conversation')
     code,search=action('search',query='Older chat');assert code==200 and B in [x['id'] for x in search['chats']],(code,search)
     assert search['hasMore'] is False,'A fully visible finite result set must not offer endless Load more'
     results.append('official search finds a conversation absent from the loaded sidebar')
+    if page.evaluate('Boolean(window.searchBoundaryFixture)'):
+     preserved=fresh(A);assert preserved['messages'] and preserved.get('searchActive') and not preserved['canSend']
+     results.append('search modal aria-hiding main does not blank the mirrored conversation')
+     code,empty=action('search',query='NO_RESULT_1');assert code==200 and empty['chats']==[] and empty['emptyConfirmed'] and not empty['loading'] and not empty['hasMore'],(code,empty)
+     code,paged=action('search',query='PAGINATED');assert code==200 and len(paged['chats'])==1 and paged['hasMore'],(code,paged)
+     code,more=action('search',query='PAGINATED',more=True);assert code==200 and len(more['chats'])==2 and not more['hasMore'],(code,more)
+     results.append('official Load more adds results and correctly reaches the end')
+     code,empty=action('search',query='NO_RESULT_2');assert code==200 and empty['chats']==[] and empty['emptyConfirmed'] and not empty['hasMore'],(code,empty)
+     results.append('a new empty query never returns stale results from the preceding query')
+     code,search=action('search',query='Older chat');assert code==200 and B in [x['id'] for x in search['chats']]
     code,opened=action('open',targetConversationId=B);assert code==200,(code,opened)
     s=fresh(B);assert page.url.endswith(B),('bound page',page.url,s['route']);assert len(req('/v1/tabs?shared=1')[1]['tabs'])==1
     results.append('phone selection navigates the SAME bound PC tab without opening a reader tab')
